@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,7 +12,7 @@ from src.utils.config import settings
 logger = logging.getLogger(__name__)
 
 
-# 精简版Prompt - 减少Token消耗
+# 精简版Prompt - 单图审核
 COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品牌规范审核设计稿。
 
 【品牌规范】
@@ -44,12 +45,68 @@ Logo: 位置左上角，高度≥画面4.2%，不得变形/改色
   "summary": "总体评价"
 }}'''
 
+# 批量审核Prompt - 多图合并
+BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品牌规范批量审核多张设计稿。
+
+【品牌规范】
+{rules_text}
+
+【审核要点】
+Logo: 位置左上角，高度≥画面4.2%，不得变形/改色
+色彩: 主色系≤3种，符合"阳光、健康、专业、生态"导向
+字体: 推荐:黑体/宋体，禁止:书法字/花体字
+排版: 文字不压主体，层级清晰，图文反差足
+
+【输出格式】JSON数组，每张图片一个对象:
+[
+  {{
+    "image_index": 0,
+    "score": 0-100,
+    "status": "pass|warning|fail",
+    "detection": {{
+      "colors": [{{"hex": "#XXX", "name": "名称", "percent": 比例}}],
+      "logo": {{"found": bool, "position": "位置", "size_percent": 数值, "position_correct": bool}},
+      "texts": ["识别的文字"],
+      "fonts": [{{"text": "文字", "font_family": "字体", "is_forbidden": bool}}]
+    }},
+    "checks": {{
+      "logo_checks": [{{"code": "L01", "name": "名称", "status": "pass|warn|fail", "detail": "说明"}}],
+      "color_checks": [...],
+      "font_checks": [...],
+      "layout_checks": [...],
+      "style_checks": [...]
+    }},
+    "issues": [{{"type": "类型", "severity": "critical|major|minor", "code": "编号", "description": "描述", "suggestion": "建议"}}],
+    "summary": "总体评价"
+  }},
+  ... (每张图片一个对象)
+]
+
+重要：输出必须是JSON数组，数组长度与图片数量一致，image_index从0开始。'''
+
 
 class LLMService:
     """LLM服务 - 调用豆包多模态API"""
 
+    # 模型上下文窗口配置（可根据实际模型调整）
+    MODEL_CONTEXT_LIMITS = {
+        # 模型名称: 上下文窗口大小（tokens）
+        "default": 128000,  # 默认128K
+        "gpt-4o": 128000,
+        "gpt-4-turbo": 128000,
+        "claude-3-opus": 200000,
+        "claude-3-sonnet": 200000,
+        "doubao-vision": 128000,  # 豆包视觉模型
+    }
+
+    # Token估算参数
+    TEXT_TOKEN_RATIO = 1.5  # 中文约1.5字符/token
+    IMAGE_BASE_TOKENS = 85  # 图片基础token
+    IMAGE_TOKEN_PER_TILE = 170  # 每个512x512 tile的token
+
     def __init__(self) -> None:
         self._llm = None
+        self._context_limit = None
 
     @property
     def llm(self):
@@ -61,9 +118,74 @@ class LLMService:
                 openai_api_base=settings.openai_api_base,
                 openai_api_key=settings.openai_api_key,
                 temperature=0.1,
-                timeout=120,  # 增加超时时间
+                timeout=180,  # 批量审核可能需要更长时间
             )
         return self._llm
+
+    @property
+    def context_limit(self) -> int:
+        """获取当前模型的上下文窗口限制"""
+        if self._context_limit is None:
+            model_name = settings.doubao_model.lower()
+            for key, limit in self.MODEL_CONTEXT_LIMITS.items():
+                if key in model_name:
+                    self._context_limit = limit
+                    break
+            else:
+                self._context_limit = self.MODEL_CONTEXT_LIMITS["default"]
+        return self._context_limit
+
+    def estimate_image_tokens(self, width: int, height: int) -> int:
+        """估算图片的token消耗"""
+        # OpenAI的多模态token计算方式
+        # 512x512以下: 85 tokens
+        # 更大的图片: 85 + 170 * tiles数量
+        if width <= 512 and height <= 512:
+            return self.IMAGE_BASE_TOKENS
+
+        tiles_x = math.ceil(width / 512)
+        tiles_y = math.ceil(height / 512)
+        tiles = tiles_x * tiles_y
+        return self.IMAGE_BASE_TOKENS + self.IMAGE_TOKEN_PER_TILE * tiles
+
+    def estimate_text_tokens(self, text: str) -> int:
+        """估算文本的token消耗"""
+        return int(len(text) / self.TEXT_TOKEN_RATIO)
+
+    def calculate_max_images(self, image_sizes: list[tuple[int, int]], rules_text: str = "") -> int:
+        """
+        动态计算单次API调用可容纳的最大图片数量
+
+        Args:
+            image_sizes: 图片尺寸列表 [(width, height), ...]
+            rules_text: 品牌规范文本
+
+        Returns:
+            可容纳的最大图片数量
+        """
+        # 系统prompt + 用户prompt的开销
+        system_tokens = self.estimate_text_tokens(BATCH_AUDIT_PROMPT)
+        rules_tokens = self.estimate_text_tokens(rules_text)
+        overhead = system_tokens + rules_tokens + 500  # 预留500 tokens
+
+        # 每张图片的token消耗 + 输出预留
+        available = self.context_limit - overhead
+
+        max_images = 0
+        total_tokens = 0
+
+        for i, (w, h) in enumerate(image_sizes):
+            img_tokens = self.estimate_image_tokens(w, h)
+            # 每张图片的输出大约需要500 tokens
+            output_reserve = 500
+            if total_tokens + img_tokens + output_reserve <= available:
+                total_tokens += img_tokens + output_reserve
+                max_images += 1
+            else:
+                break
+
+        logger.info(f"上下文窗口: {self.context_limit}, 可用: {available}, 可容纳图片: {max_images}")
+        return max(max_images, 1)  # 至少返回1
 
     def set_api_config(self, api_key: str, api_base: str = None, model: str = None) -> None:
         """设置API配置"""
@@ -73,6 +195,7 @@ class LLMService:
         if model:
             settings.doubao_model = model
         self._llm = None  # 重置LLM实例
+        self._context_limit = None  # 重置上下文限制
         logger.info("API配置已更新")
 
     def audit_image(
@@ -83,7 +206,7 @@ class LLMService:
         progress_callback=None,
     ) -> dict[str, Any]:
         """
-        审核图片
+        审核单张图片
 
         Args:
             image_base64: Base64编码的图片数据
@@ -127,6 +250,118 @@ class LLMService:
         except Exception as e:
             logger.error(f"审核失败: {e}")
             return self._build_error_result(f"审核过程出错: {str(e)}")
+
+    def audit_images_batch(
+        self,
+        images: list[dict],
+        rules_text: str = "",
+        progress_callback=None,
+    ) -> list[dict[str, Any]]:
+        """
+        单次API调用审核多张图片（合并请求方案）
+
+        Args:
+            images: 图片列表，每个元素包含 {"base64": str, "format": str}
+            rules_text: 品牌规范文本
+            progress_callback: 进度回调
+
+        Returns:
+            审核结果列表
+        """
+        try:
+            if not images:
+                return []
+
+            if len(images) == 1:
+                # 单张图片，使用单图接口
+                result = self.audit_image(
+                    images[0]["base64"],
+                    images[0].get("format", "jpeg"),
+                    rules_text
+                )
+                return [result]
+
+            logger.info(f"批量审核: 单次API调用处理 {len(images)} 张图片")
+
+            # 构建Prompt
+            system_content = BATCH_AUDIT_PROMPT.format(rules_text=rules_text)
+
+            # 构建用户消息，包含多张图片
+            user_content = [{"type": "text", "text": f"审核以下{len(images)}张设计稿，输出JSON数组格式的报告。每张图片对应一个对象。"}]
+
+            for i, img in enumerate(images):
+                image_url = f"data:image/{img.get('format', 'jpeg')};base64,{img['base64']}"
+                user_content.append({
+                    "type": "text",
+                    "text": f"\n--- 图片 {i + 1} ---"
+                })
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                })
+
+            messages = [
+                SystemMessage(content=system_content),
+                HumanMessage(content=user_content),
+            ]
+
+            # 调用LLM
+            logger.info("正在调用API进行批量审核...")
+            response = self.llm.invoke(messages)
+            content = response.content
+
+            # 解析结果
+            results = self._parse_batch_response(content, len(images))
+
+            if progress_callback:
+                progress_callback(len(images), len(images), "批量审核完成")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"批量审核失败: {e}")
+            return [self._build_error_result(f"批量审核出错: {str(e)}") for _ in images]
+
+    def _parse_batch_response(self, content: str, expected_count: int) -> list[dict]:
+        """解析批量审核响应"""
+        import re
+
+        results = []
+
+        # 尝试解析JSON数组
+        try:
+            data = json.loads(content)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        results.append(self._normalize_result(item))
+                if len(results) == expected_count:
+                    return results
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试提取JSON数组块
+        array_match = re.search(r'\[\s*\{[\s\S]*\}\s*\]', content)
+        if array_match:
+            try:
+                data = json.loads(array_match.group())
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            results.append(self._normalize_result(item))
+                    if len(results) == expected_count:
+                        return results
+            except json.JSONDecodeError:
+                pass
+
+        # 解析失败，尝试提取单个结果
+        logger.warning(f"批量响应解析不完整，预期{expected_count}个结果，实际解析{len(results)}个")
+
+        # 补充缺失的结果
+        while len(results) < expected_count:
+            results.append(self._build_error_result(f"第{len(results)+1}张图片结果解析失败"))
+
+        return results[:expected_count]
 
     def _parse_json_response(self, content: str) -> Optional[dict]:
         """解析LLM响应中的JSON"""

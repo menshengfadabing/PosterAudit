@@ -159,7 +159,15 @@ class SettingsPage(QWidget):
         left_panel = QFrame()
         left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
         left_panel.setMinimumWidth(350)
-        left_layout = QVBoxLayout(left_panel)
+
+        # 创建滚动区域包裹左侧内容
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        left_content = QWidget()
+        left_layout = QVBoxLayout(left_content)
         left_layout.setContentsMargins(15, 15, 15, 15)
         left_layout.setSpacing(15)
 
@@ -250,7 +258,11 @@ class SettingsPage(QWidget):
         upload_row.addWidget(self.new_btn)
         left_layout.addLayout(upload_row)
 
-        splitter.addWidget(left_panel)
+        left_layout.addStretch()
+
+        # 将左侧内容添加到滚动区域
+        left_scroll.setWidget(left_content)
+        splitter.addWidget(left_scroll)
 
         # 右侧：规范详情
         right_panel = QFrame()

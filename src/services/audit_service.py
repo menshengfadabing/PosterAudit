@@ -34,10 +34,57 @@ class AuditService:
 
     SUPPORTED_FORMATS = {"png", "jpeg", "jpg", "gif", "bmp", "webp"}
 
-    # 压缩配置
-    MAX_DIMENSION = 1920  # 最大边长
-    MAX_FILE_SIZE = 500_000  # 最大文件大小 500KB
-    JPEG_QUALITY = 75  # JPEG质量
+    # 默认压缩配置
+    DEFAULT_COMPRESSION = {
+        "max_dimension": 1920,      # 最大边长
+        "max_file_size": 500_000,   # 最大文件大小 500KB
+        "quality": 75,              # JPEG质量
+        "enabled": True,            # 是否启用压缩
+    }
+
+    # 压缩预设
+    COMPRESSION_PRESETS = {
+        "high_quality": {
+            "max_dimension": 2560,
+            "max_file_size": 1_000_000,  # 1MB
+            "quality": 90,
+            "enabled": True,
+        },
+        "balanced": {
+            "max_dimension": 1920,
+            "max_file_size": 500_000,    # 500KB
+            "quality": 75,
+            "enabled": True,
+        },
+        "high_compression": {
+            "max_dimension": 1280,
+            "max_file_size": 300_000,    # 300KB
+            "quality": 60,
+            "enabled": True,
+        },
+        "no_compression": {
+            "max_dimension": 4096,
+            "max_file_size": 10_000_000,  # 10MB
+            "quality": 95,
+            "enabled": False,
+        },
+    }
+
+    def __init__(self):
+        self._compression_config = self.DEFAULT_COMPRESSION.copy()
+
+    def set_compression_config(self, config: dict):
+        """设置压缩配置"""
+        self._compression_config.update(config)
+        logger.info(f"压缩配置已更新: {self._compression_config}")
+
+    def set_compression_preset(self, preset_name: str):
+        """使用预设压缩配置"""
+        if preset_name in self.COMPRESSION_PRESETS:
+            self._compression_config = self.COMPRESSION_PRESETS[preset_name].copy()
+            logger.info(f"使用压缩预设: {preset_name}")
+        else:
+            logger.warning(f"未知的压缩预设: {preset_name}")
 
     def preprocess_image(self, image_data: bytes | str, image_format: str = "png") -> tuple[str, str]:
         """
@@ -50,6 +97,8 @@ class AuditService:
         Returns:
             (base64编码的图片, 格式)
         """
+        config = self._compression_config
+
         # 解码输入
         if isinstance(image_data, str):
             if image_data.startswith("data:"):
@@ -65,12 +114,16 @@ class AuditService:
 
         img = Image.open(BytesIO(image_data))
         original_size = img.size
-        original_mode = img.mode
+        original_kb = len(image_data) / 1024
+
+        # 如果禁用压缩，直接返回
+        if not config.get("enabled", True):
+            logger.info(f"压缩已禁用，原图大小: {original_kb:.1f}KB")
+            return base64.b64encode(image_data).decode(), image_format
 
         # 转换为RGB模式（统一处理）
         if img.mode in ("RGBA", "P", "LA", "L"):
             if img.mode == "RGBA":
-                # 保留透明度信息，使用白色背景
                 background = Image.new("RGB", img.size, (255, 255, 255))
                 background.paste(img, mask=img.split()[-1])
                 img = background
@@ -86,7 +139,7 @@ class AuditService:
                 img = img.convert("RGB")
 
         # 智能缩放
-        max_dimension = self.MAX_DIMENSION
+        max_dimension = config.get("max_dimension", 1920)
         if max(img.size) > max_dimension:
             ratio = max_dimension / max(img.size)
             new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
@@ -94,22 +147,24 @@ class AuditService:
             logger.info(f"图片缩放: {original_size} -> {img.size}")
 
         # 压缩为JPEG格式
+        quality = config.get("quality", 75)
+        max_file_size = config.get("max_file_size", 500_000)
+
         buffer = BytesIO()
-        img.save(buffer, format="JPEG", quality=self.JPEG_QUALITY, optimize=True)
+        img.save(buffer, format="JPEG", quality=quality, optimize=True)
 
         # 检查文件大小，如果过大则进一步压缩
         file_size = len(buffer.getvalue())
-        if file_size > self.MAX_FILE_SIZE:
+        if file_size > max_file_size:
             # 计算需要的质量
-            quality = max(50, int(self.JPEG_QUALITY * self.MAX_FILE_SIZE / file_size))
+            new_quality = max(50, int(quality * max_file_size / file_size))
             buffer = BytesIO()
-            img.save(buffer, format="JPEG", quality=quality, optimize=True)
-            logger.info(f"图片进一步压缩: quality={quality}, size={len(buffer.getvalue())}")
+            img.save(buffer, format="JPEG", quality=new_quality, optimize=True)
+            logger.info(f"图片进一步压缩: quality={new_quality}, size={len(buffer.getvalue())}")
 
         image_base64 = base64.b64encode(buffer.getvalue()).decode()
 
         # 记录压缩效果
-        original_kb = len(image_data) / 1024
         compressed_kb = len(buffer.getvalue()) / 1024
         compression_ratio = (1 - compressed_kb / original_kb) * 100 if original_kb > 0 else 0
         logger.info(f"图片压缩完成: {original_kb:.1f}KB -> {compressed_kb:.1f}KB (节省{compression_ratio:.1f}%)")
@@ -162,7 +217,7 @@ class AuditService:
             logger.error(f"审核失败: {e}", exc_info=True)
             raise
 
-    def batch_audit(
+    def batch_audit_concurrent(
         self,
         image_paths: list,
         brand_id: str | None = None,
@@ -170,30 +225,33 @@ class AuditService:
         progress_callback=None,
     ) -> list:
         """
-        并发批量审核
+        并发批量审核（方案A：多个独立API请求）
 
         Args:
             image_paths: 图片路径列表
             brand_id: 品牌ID
             max_concurrent: 最大并发数
-            progress_callback: 进度回调函数 (current, total, message)
+            progress_callback: 进度回调函数
 
         Returns:
             审核结果列表
         """
+        import time
+
         results = [None] * len(image_paths)
         total = len(image_paths)
+        start_time = time.time()
 
-        logger.info(f"开始批量审核: {total}张图片, 最大并发数: {max_concurrent}")
+        logger.info(f"开始并发批量审核: {total}张图片, 最大并发数: {max_concurrent}")
 
         with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-            # 提交所有任务
+            submit_time = time.time()
             future_to_index = {
                 executor.submit(self.audit_file, path, brand_id): i
                 for i, path in enumerate(image_paths)
             }
+            logger.info(f"所有任务已提交，耗时: {time.time() - submit_time:.2f}秒")
 
-            # 收集结果
             completed = 0
             for future in as_completed(future_to_index):
                 index = future_to_index[future]
@@ -212,11 +270,130 @@ class AuditService:
                     }
 
                 completed += 1
+                elapsed = time.time() - start_time
+                logger.info(f"进度: {completed}/{total}, 已耗时: {elapsed:.1f}秒")
+
                 if progress_callback:
                     progress_callback(completed, total, f"已完成 {completed}/{total}")
 
-        logger.info(f"批量审核完成: {completed}/{total}")
+        total_time = time.time() - start_time
+        avg_time = total_time / total if total > 0 else 0
+        logger.info(f"并发批量审核完成: {completed}/{total}, 总耗时: {total_time:.1f}秒, 平均每张: {avg_time:.1f}秒")
+
         return results
+
+    def batch_audit_merged(
+        self,
+        image_paths: list,
+        brand_id: str | None = None,
+        max_images_per_request: int = None,
+        progress_callback=None,
+    ) -> list:
+        """
+        合并请求批量审核（方案B：单次API调用处理多张图片）
+
+        Args:
+            image_paths: 图片路径列表
+            brand_id: 品牌ID
+            max_images_per_request: 单次请求最大图片数（None则自动计算）
+            progress_callback: 进度回调函数
+
+        Returns:
+            审核结果列表
+        """
+        import time
+
+        total = len(image_paths)
+        start_time = time.time()
+
+        logger.info(f"开始合并请求批量审核: {total}张图片")
+
+        # 预处理所有图片
+        images = []
+        image_sizes = []
+
+        for path in image_paths:
+            file_path = Path(path)
+            with open(file_path, "rb") as f:
+                image_data = f.read()
+
+            # 预处理图片
+            image_base64, image_format = self.preprocess_image(image_data, file_path.suffix.lstrip(".").lower())
+            images.append({"base64": image_base64, "format": image_format})
+
+            # 记录原始尺寸用于计算窗口容量
+            try:
+                img = Image.open(BytesIO(image_data))
+                image_sizes.append(img.size)
+            except:
+                image_sizes.append((1920, 1080))  # 默认尺寸
+
+        # 获取品牌规范
+        rules_text = rules_context.get_rules_text(brand_id)
+
+        # 计算单次请求可容纳的最大图片数
+        if max_images_per_request is None:
+            max_images_per_request = llm_service.calculate_max_images(image_sizes, rules_text)
+            logger.info(f"动态计算: 单次请求最多可处理 {max_images_per_request} 张图片")
+
+        # 分批处理
+        results = []
+        batches = [images[i:i + max_images_per_request] for i in range(0, len(images), max_images_per_request)]
+        batch_paths = [image_paths[i:i + max_images_per_request] for i in range(0, len(image_paths), max_images_per_request)]
+
+        logger.info(f"分为 {len(batches)} 批次处理")
+
+        for batch_idx, (batch_images, batch_path_list) in enumerate(zip(batches, batch_paths)):
+            batch_start = time.time()
+            logger.info(f"处理第 {batch_idx + 1}/{len(batches)} 批，共 {len(batch_images)} 张图片")
+
+            # 调用LLM批量审核
+            batch_results = llm_service.audit_images_batch(
+                images=batch_images,
+                rules_text=rules_text,
+                progress_callback=None,
+            )
+
+            batch_time = time.time() - batch_start
+            logger.info(f"批次 {batch_idx + 1} 完成，耗时: {batch_time:.1f}秒")
+
+            # 转换结果格式
+            for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
+                try:
+                    report = self._build_report(result)
+                    results.append({
+                        "file_name": Path(path).name,
+                        "status": "success",
+                        "report": report
+                    })
+                except Exception as e:
+                    logger.error(f"结果转换失败 [{path}]: {e}")
+                    results.append({
+                        "file_name": Path(path).name,
+                        "status": "error",
+                        "error": str(e)
+                    })
+
+            if progress_callback:
+                completed = min((batch_idx + 1) * max_images_per_request, total)
+                progress_callback(completed, total, f"已完成批次 {batch_idx + 1}/{len(batches)}")
+
+        total_time = time.time() - start_time
+        logger.info(f"合并请求批量审核完成: 总耗时: {total_time:.1f}秒, 平均每张: {total_time/total:.1f}秒")
+
+        return results
+
+    def batch_audit(
+        self,
+        image_paths: list,
+        brand_id: str | None = None,
+        max_concurrent: int = 5,
+        progress_callback=None,
+    ) -> list:
+        """
+        批量审核（默认使用并发方案，保持向后兼容）
+        """
+        return self.batch_audit_concurrent(image_paths, brand_id, max_concurrent, progress_callback)
 
     def _build_report(self, result: dict) -> AuditReport:
         """从LLM结果构建审核报告"""
