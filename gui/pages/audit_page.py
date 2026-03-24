@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QMessageBox, QSplitter, QFrame, QTextEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QTabWidget, QComboBox, QCheckBox, QFileDialog, QScrollArea,
-    QGridLayout, QSpinBox
+    QGridLayout, QSpinBox, QSizePolicy
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
@@ -81,14 +81,24 @@ class AuditPage(QWidget):
         """创建单图审核标签页"""
         widget = QWidget()
         layout = QHBoxLayout(widget)
-        layout.setSpacing(25)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 使用QSplitter实现可调整大小的面板
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #ddd;
+                width: 3px;
+            }
+        """)
 
         # 左侧：设置区域
         left_panel = QFrame()
         left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        left_panel.setMinimumWidth(400)
-        left_panel.setMaximumWidth(450)
+        left_panel.setMinimumWidth(350)
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(15, 15, 15, 15)
         left_layout.setSpacing(18)
 
         # 品牌选择
@@ -108,7 +118,30 @@ class AuditPage(QWidget):
         brand_row.addWidget(brand_label)
         self.brand_combo = QComboBox()
         self.brand_combo.setMinimumWidth(250)
-        self.brand_combo.setStyleSheet("font-size: 15px; padding: 8px;")
+        self.brand_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 15px;
+            }
+        """)
         self._load_brand_list()
         brand_row.addWidget(self.brand_combo)
         brand_layout.addLayout(brand_row)
@@ -176,12 +209,14 @@ class AuditPage(QWidget):
         left_layout.addWidget(self.status_label)
 
         left_layout.addStretch()
-        layout.addWidget(left_panel)
+        splitter.addWidget(left_panel)
 
         # 右侧：结果展示
         right_panel = QFrame()
         right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
+        right_panel.setMinimumWidth(500)
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(15, 15, 15, 15)
 
         # 结果标题
         result_title = QLabel("审核结果")
@@ -277,7 +312,12 @@ class AuditPage(QWidget):
         export_layout.addWidget(self.export_md_btn)
         right_layout.addLayout(export_layout)
 
-        layout.addWidget(right_panel, 1)
+        splitter.addWidget(right_panel)
+
+        # 设置初始比例
+        splitter.setSizes([400, 700])
+
+        layout.addWidget(splitter)
 
         return widget
 
@@ -313,7 +353,30 @@ class AuditPage(QWidget):
         settings_layout.addWidget(brand_label, 0, 0)
         self.batch_brand_combo = QComboBox()
         self.batch_brand_combo.setMinimumWidth(300)
-        self.batch_brand_combo.setStyleSheet("font-size: 15px; padding: 8px;")
+        self.batch_brand_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 15px;
+            }
+        """)
         self._load_batch_brand_list()
         settings_layout.addWidget(self.batch_brand_combo, 0, 1)
 

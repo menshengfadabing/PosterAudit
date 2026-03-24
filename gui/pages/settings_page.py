@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QGroupBox, QFileDialog, QMessageBox, QTextEdit, QComboBox, QTabWidget,
-    QScrollArea, QFrame, QGridLayout
+    QScrollArea, QFrame, QGridLayout, QInputDialog, QSizePolicy, QSplitter
 )
 from PySide6.QtCore import Qt
 
@@ -167,12 +167,24 @@ class SettingsPage(QWidget):
         """创建规范管理标签页"""
         widget = QWidget()
         layout = QHBoxLayout(widget)
-        layout.setSpacing(25)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 使用QSplitter实现可调整大小的面板
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #ddd;
+                width: 3px;
+            }
+        """)
 
         # 左侧：规范列表
         left_panel = QFrame()
         left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
+        left_panel.setMinimumWidth(350)
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(15, 15, 15, 15)
         left_layout.setSpacing(15)
 
         list_title = QLabel("已导入的规范")
@@ -186,7 +198,34 @@ class SettingsPage(QWidget):
         select_layout.addWidget(select_label)
         self.rules_combo = QComboBox()
         self.rules_combo.setMinimumWidth(300)
-        self.rules_combo.setStyleSheet("font-size: 15px; padding: 8px;")
+        self.rules_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                width: 12px;
+                height: 12px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 15px;
+            }
+        """)
         select_layout.addWidget(self.rules_combo)
         left_layout.addLayout(select_layout)
 
@@ -235,12 +274,14 @@ class SettingsPage(QWidget):
         upload_row.addWidget(self.new_btn)
         left_layout.addLayout(upload_row)
 
-        layout.addWidget(left_panel, 1)
+        splitter.addWidget(left_panel)
 
         # 右侧：规范详情
         right_panel = QFrame()
         right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
+        right_panel.setMinimumWidth(400)
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(15, 15, 15, 15)
 
         detail_title = QLabel("规范详情")
         detail_title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
@@ -261,7 +302,12 @@ class SettingsPage(QWidget):
         """)
         right_layout.addWidget(self.rules_preview)
 
-        layout.addWidget(right_panel, 2)
+        splitter.addWidget(right_panel)
+
+        # 设置初始比例
+        splitter.setSizes([350, 600])
+
+        layout.addWidget(splitter)
 
         # 连接信号
         self.rules_combo.currentIndexChanged.connect(self._on_rules_changed)
@@ -414,12 +460,32 @@ class SettingsPage(QWidget):
         if not file_path:
             return
 
+        # 从文件名提取默认品牌名（去掉扩展名）
+        file_name = Path(file_path).stem
+        default_name = file_name[:20] if len(file_name) > 20 else file_name  # 限制长度
+
+        # 弹出输入对话框让用户命名
+        brand_name, ok = QInputDialog.getText(
+            self, "品牌命名",
+            "请输入品牌名称（留空则自动从文件名提取）:",
+            QLineEdit.EchoMode.Normal,
+            default_name
+        )
+
+        if not ok:
+            # 用户取消
+            return
+
+        # 如果用户输入为空，使用默认名称
+        brand_name = brand_name.strip() if brand_name.strip() else default_name
+
         # 禁用按钮，显示处理中
         self.upload_btn.setEnabled(False)
         self.upload_btn.setText("解析中...")
+        self._current_brand_name = brand_name  # 保存品牌名称
 
         # 后台线程解析
-        self._parse_worker = Worker(document_parser.parse_file, file_path)
+        self._parse_worker = Worker(document_parser.parse_file, file_path, brand_name)
         self._parse_worker.finished_signal.connect(self._on_parse_finished)
         self._parse_worker.error_signal.connect(self._on_parse_error)
         self._parse_worker.start()
@@ -428,6 +494,10 @@ class SettingsPage(QWidget):
         """解析完成"""
         self.upload_btn.setEnabled(True)
         self.upload_btn.setText("上传规范文档 (PDF/PPT)")
+
+        # 使用用户输入的品牌名称
+        if hasattr(self, '_current_brand_name') and self._current_brand_name:
+            rules.brand_name = self._current_brand_name
 
         # 保存
         brand_id = rules_context.add_rules(rules)
