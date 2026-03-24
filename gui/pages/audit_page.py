@@ -327,11 +327,16 @@ class AuditPage(QWidget):
         layout = QVBoxLayout(widget)
         layout.setSpacing(18)
 
-        # 提示信息
+        # 提示信息 - 更新为准确的时间预估
         hint_frame = QFrame()
         hint_frame.setStyleSheet("background-color: #FEF3C7; border-radius: 8px; padding: 15px;")
         hint_layout = QVBoxLayout(hint_frame)
-        hint_label = QLabel("批量审核性能预估：10张图约需 15-20秒 | 50张图约需 1-2分钟 | 100张图约需 2-4分钟")
+        hint_label = QLabel(
+            "批量审核预估时间：\n"
+            "• 单张图片约需 45-90 秒\n"
+            "• 10张图片约需 2-4 分钟（并发处理）\n"
+            "• 图片会自动压缩以节省时间和Token消耗"
+        )
         hint_label.setStyleSheet("color: #92400E; font-size: 14px;")
         hint_layout.addWidget(hint_label)
         layout.addWidget(hint_frame)
@@ -739,45 +744,139 @@ class AuditPage(QWidget):
                 QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
 
     def _report_to_markdown(self, report) -> str:
-        """将报告转换为Markdown"""
+        """将报告转换为Markdown - 完整版"""
+        status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过"}
+
         lines = [
             "# 品牌合规审核报告",
             "",
             f"**评分**: {report.score}/100",
-            f"**状态**: {report.status.value}",
-            f"**摘要**: {report.summary}",
+            f"**状态**: {status_map.get(report.status.value, report.status.value)}",
             "",
-            "## 检测结果",
-            "",
-            "### Logo",
-            f"- 检测到Logo: {'是' if report.detection.logo.found else '否'}",
         ]
 
-        if report.detection.logo.found:
+        # 摘要
+        if report.summary:
             lines.extend([
-                f"- 位置: {report.detection.logo.position}",
-                f"- 尺寸占比: {report.detection.logo.size_percent}%",
+                "## 总体评价",
+                "",
+                report.summary,
+                "",
             ])
 
-        lines.extend([
-            "",
-            "### 颜色",
-        ])
+        # 检测结果
+        lines.append("## 检测结果")
+        lines.append("")
 
-        for color in report.detection.colors:
-            lines.append(f"- {color.hex} ({color.name}): {color.percent:.1f}%")
+        detection = report.detection
 
+        # Logo检测结果
+        lines.append("### Logo检测")
+        lines.append("")
+        if detection.logo.found:
+            lines.append(f"- **检测到Logo**: 是")
+            lines.append(f"- **位置**: {detection.logo.position or '未知'}")
+            if detection.logo.size_percent:
+                lines.append(f"- **尺寸占比**: {detection.logo.size_percent:.1f}%")
+            if detection.logo.position_correct is not None:
+                pos_status = "✅ 正确" if detection.logo.position_correct else "❌ 错误"
+                lines.append(f"- **位置正确**: {pos_status}")
+            if detection.logo.color_correct is not None:
+                color_status = "✅ 正确" if detection.logo.color_correct else "❌ 错误"
+                lines.append(f"- **颜色正确**: {color_status}")
+        else:
+            lines.append("- **检测到Logo**: 否")
+        lines.append("")
+
+        # 颜色检测结果
+        if detection.colors:
+            lines.append("### 颜色检测")
+            lines.append("")
+            lines.append("| 颜色值 | 名称 | 占比 |")
+            lines.append("|--------|------|------|")
+            for c in detection.colors:
+                lines.append(f"| {c.hex} | {c.name} | {c.percent:.1f}% |")
+            lines.append("")
+
+        # 文字检测结果
+        if detection.texts:
+            lines.append("### 文字检测 (OCR)")
+            lines.append("")
+            for i, text in enumerate(detection.texts[:10], 1):
+                lines.append(f"{i}. {text}")
+            if len(detection.texts) > 10:
+                lines.append(f"_... 共 {len(detection.texts)} 条_")
+            lines.append("")
+
+        # 字体检测结果
+        if detection.fonts:
+            lines.append("### 字体检测")
+            lines.append("")
+            for f in detection.fonts:
+                status = "🚫 禁用" if f.is_forbidden else "✅ 正常"
+                lines.append(f"- **{f.text}**: {f.font_family} ({status})")
+            lines.append("")
+
+        # 检查项详情
+        if report.checks:
+            lines.append("## 检查项详情")
+            lines.append("")
+
+            check_titles = {
+                "logo_checks": "Logo检查",
+                "color_checks": "色彩检查",
+                "font_checks": "字体检查",
+                "layout_checks": "排版检查",
+                "style_checks": "风格检查"
+            }
+
+            status_icons = {"pass": "✅", "warn": "⚠️", "fail": "❌"}
+
+            for check_type, items in report.checks.items():
+                if items:
+                    lines.append(f"### {check_titles.get(check_type, check_type)}")
+                    lines.append("")
+                    for item in items:
+                        icon = status_icons.get(item.status, "❓")
+                        lines.append(f"- {icon} **{item.code}** {item.name}: {item.detail}")
+                    lines.append("")
+
+        # 问题列表
         if report.issues:
-            lines.extend([
-                "",
-                "## 问题列表",
-                "",
-            ])
+            lines.append("## 问题列表")
+            lines.append("")
 
-            for issue in report.issues:
-                lines.append(f"- **[{issue.severity.value}]** {issue.description}")
-                if issue.suggestion:
-                    lines.append(f"  - 建议: {issue.suggestion}")
+            # 按严重程度分组
+            critical = [i for i in report.issues if i.severity.value == "critical"]
+            major = [i for i in report.issues if i.severity.value == "major"]
+            minor = [i for i in report.issues if i.severity.value == "minor"]
+
+            if critical:
+                lines.append("### 🔴 严重问题")
+                lines.append("")
+                for issue in critical:
+                    lines.append(f"- {issue.description}")
+                    if issue.suggestion:
+                        lines.append(f"  - 💡 建议: {issue.suggestion}")
+                lines.append("")
+
+            if major:
+                lines.append("### 🟡 主要问题")
+                lines.append("")
+                for issue in major:
+                    lines.append(f"- {issue.description}")
+                    if issue.suggestion:
+                        lines.append(f"  - 💡 建议: {issue.suggestion}")
+                lines.append("")
+
+            if minor:
+                lines.append("### 🟢 次要问题")
+                lines.append("")
+                for issue in minor:
+                    lines.append(f"- {issue.description}")
+                    if issue.suggestion:
+                        lines.append(f"  - 💡 建议: {issue.suggestion}")
+                lines.append("")
 
         return "\n".join(lines)
 
@@ -804,26 +903,44 @@ class AuditPage(QWidget):
         self._batch_worker.start()
 
     def _run_batch_audit(self, image_paths: list, brand_id: str, progress_callback=None):
-        """执行批量审核"""
-        results = []
-        for i, path in enumerate(image_paths):
+        """执行批量审核 - 使用并发处理"""
+        import concurrent.futures
+
+        results = [None] * len(image_paths)
+        total = len(image_paths)
+
+        def audit_single(index, path):
+            """审核单张图片"""
             try:
                 report = audit_service.audit_file(path, brand_id)
-                results.append({
+                return index, {
                     "file_name": Path(path).name,
                     "status": report.status.value,
                     "score": report.score,
                     "report": json.loads(report.to_json())
-                })
+                }
             except Exception as e:
-                results.append({
+                return index, {
                     "file_name": Path(path).name,
                     "status": "error",
                     "error": str(e)
-                })
+                }
 
-            if progress_callback:
-                progress_callback(i + 1, f"已完成 {i+1}/{len(image_paths)}")
+        # 并发审核，最大5个并发
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                executor.submit(audit_single, i, path): i
+                for i, path in enumerate(image_paths)
+            }
+
+            for future in concurrent.futures.as_completed(futures):
+                index, result = future.result()
+                results[index] = result
+                completed += 1
+
+                if progress_callback:
+                    progress_callback(completed, f"已完成 {completed}/{total}")
 
         return results
 

@@ -135,30 +135,6 @@ class SettingsPage(QWidget):
         api_layout.addWidget(save_api_btn, 3, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
 
         layout.addWidget(api_group)
-
-        # 高级设置组
-        advanced_group = QGroupBox("高级设置")
-        advanced_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-        """)
-        advanced_layout = QVBoxLayout(advanced_group)
-
-        # 缓存设置
-        cache_info = QLabel("审核结果缓存可加速重复图片的审核速度")
-        cache_info.setStyleSheet("color: #7f8c8d; font-size: 14px;")
-        advanced_layout.addWidget(cache_info)
-
-        clear_cache_btn = QPushButton("清空缓存")
-        clear_cache_btn.setMaximumWidth(120)
-        clear_cache_btn.setStyleSheet("font-size: 15px;")
-        clear_cache_btn.clicked.connect(self._clear_cache)
-        advanced_layout.addWidget(clear_cache_btn)
-
-        layout.addWidget(advanced_group)
         layout.addStretch()
 
         return widget
@@ -547,9 +523,3 @@ class SettingsPage(QWidget):
             rules_context.delete_rules(brand_id)
             self._load_rules_list()
             QMessageBox.information(self, "成功", "规范已删除")
-
-    def _clear_cache(self):
-        """清空缓存"""
-        from src.services.llm_service import audit_cache
-        audit_cache.clear()
-        QMessageBox.information(self, "成功", "缓存已清空")

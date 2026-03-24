@@ -1,10 +1,19 @@
 [
   {
-    "batch_id": "batch_20260324_161932_fd545c",
-    "time": "2026-03-24 16:19:32",
+    "batch_id": "batch_20260324_165257_cf16fa",
+    "time": "2026-03-24 16:52:57",
     "brand_name": "讯飞品牌设计标准",
     "file_count": 2,
     "status": "completed",
-    "score": 75.0
+    "score": 65.0
+  },
+  {
+    "batch_id": "single_20260324_165032_970c90",
+    "time": "2026-03-24 16:50:32",
+    "brand_name": "讯飞品牌设计标准",
+    "file_name": "20260323-105800.jpg",
+    "file_count": 1,
+    "status": "fail",
+    "score": 55
   }
 ]

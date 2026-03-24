@@ -1,0 +1,478 @@
+{
+  "time": "2026-03-24 16:27:31",
+  "results": [
+    {
+      "file_name": "20260323-105800.jpg",
+      "status": "fail",
+      "score": 65,
+      "report": {
+        "score": 65,
+        "status": "fail",
+        "detection": {
+          "colors": [
+            {
+              "hex": "#E6212A",
+              "name": "主背景红",
+              "percent": 70.0
+            },
+            {
+              "hex": "#D4AF37",
+              "name": "装饰金",
+              "percent": 25.0
+            },
+            {
+              "hex": "#FFFFFF",
+              "name": "高光白",
+              "percent": 5.0
+            }
+          ],
+          "logo": {
+            "found": true,
+            "position": "左下角",
+            "position_correct": false,
+            "size_percent": 3.2,
+            "size_correct": null,
+            "color_type": "",
+            "color_correct": false,
+            "safe_margin_ok": null,
+            "deformed": null
+          },
+          "texts": [
+            "颁奖典礼",
+            "2025-2026年度技术中心总结&计划报告暨表彰大会",
+            "科大讯飞 iFLYTEK",
+            "致敬每一位奋斗的讯飞人",
+            "成就客户 简单真诚",
+            "创新坚守 专业敬业",
+            "团队协作 担单奋进",
+            "技术中心HR体系"
+          ],
+          "fonts": [
+            {
+              "text": "颁奖典礼",
+              "font_family": "装饰性书法字体",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": true
+            },
+            {
+              "text": "2025-2026年度技术中心总结&计划报告暨表彰大会",
+              "font_family": "黑体类",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": false
+            },
+            {
+              "text": "科大讯飞、致敬每一位奋斗的讯飞人、底部价值观文字",
+              "font_family": "黑体",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": false
+            }
+          ],
+          "layout": {
+            "has_clear_focus": null,
+            "text_on_subject": null,
+            "contrast_sufficient": null,
+            "alignment_correct": null
+          },
+          "style": {
+            "sunshine": {
+              "score": 7,
+              "issues": []
+            },
+            "health": {
+              "score": 7,
+              "issues": []
+            },
+            "professional": {
+              "score": 7,
+              "issues": []
+            },
+            "ecology": {
+              "score": 7,
+              "issues": []
+            }
+          }
+        },
+        "checks": {
+          "logo_checks": [
+            {
+              "code": "L01",
+              "name": "结构完整性",
+              "status": "pass",
+              "detail": "Logo未出现拉伸、变形、拆改情况，结构完整"
+            },
+            {
+              "code": "L02",
+              "name": "标准色规范",
+              "status": "fail",
+              "detail": "Logo使用了金色，不属于允许的品牌标准蓝、反白版、墨稿黑范畴"
+            },
+            {
+              "code": "L03",
+              "name": "背景适配",
+              "status": "fail",
+              "detail": "当前背景为深色红色，应使用反白版Logo，实际使用金色版本不符合要求"
+            },
+            {
+              "code": "L04",
+              "name": "位置规范",
+              "status": "fail",
+              "detail": "Logo位于画面左下角，不符合必须位于画面左上角的要求"
+            },
+            {
+              "code": "L05",
+              "name": "最小比例",
+              "status": "fail",
+              "detail": "Logo高度约占画面高度的3.2%，低于要求的4.2%"
+            },
+            {
+              "code": "L06",
+              "name": "安全区",
+              "status": "pass",
+              "detail": "Logo周围无其他文字图形侵入，安全间距符合要求"
+            },
+            {
+              "code": "L07",
+              "name": "联合标识",
+              "status": "pass",
+              "detail": "无多品牌联合标识，不存在分隔问题"
+            }
+          ],
+          "color_checks": [
+            {
+              "code": "C01",
+              "name": "色系数量",
+              "status": "pass",
+              "detail": "主色系为红、金、白共3种，符合不超过3种的要求"
+            },
+            {
+              "code": "C02",
+              "name": "配色比例",
+              "status": "pass",
+              "detail": "主色红色占比约70%，辅助色金色占比约25%，点缀色白色占比约5%，符合主色、辅助色、点缀色的层次逻辑"
+            },
+            {
+              "code": "C03",
+              "name": "主色调方向",
+              "status": "pass",
+              "detail": "红金搭配明亮喜庆，符合阳光、健康、专业的导向"
+            }
+          ],
+          "font_checks": [
+            {
+              "code": "F01",
+              "name": "字体数量",
+              "status": "pass",
+              "detail": "单个版面共使用3种字体，符合不超过3种的要求"
+            },
+            {
+              "code": "F02",
+              "name": "字体风格",
+              "status": "fail",
+              "detail": "主标题“颁奖典礼”使用了装饰性书法字体，属于禁用字体范畴"
+            }
+          ],
+          "layout_checks": [
+            {
+              "code": "T01",
+              "name": "文本位置",
+              "status": "pass",
+              "detail": "所有文本均放置于空白区域，未压在奖杯这一主体焦点区域"
+            },
+            {
+              "code": "T02",
+              "name": "信息层级",
+              "status": "pass",
+              "detail": "版面视觉中心为奖杯与主标题，信息层级清晰：主标题>副标题>底部辅助信息，符合要求"
+            },
+            {
+              "code": "T03",
+              "name": "对齐方式",
+              "status": "pass",
+              "detail": "主副标题居中对齐、底部品牌信息左对齐、价值观信息右对齐，与对称式主体结构逻辑一致"
+            },
+            {
+              "code": "T04",
+              "name": "图文反差",
+              "status": "pass",
+              "detail": "金色文字与红色背景反差足够，可读性良好"
+            }
+          ],
+          "style_checks": [
+            {
+              "code": "S01",
+              "name": "阳光",
+              "status": "pass",
+              "detail": "整体色调明亮、氛围积极向上，无阴暗压抑感"
+            },
+            {
+              "code": "S02",
+              "name": "健康",
+              "status": "pass",
+              "detail": "版面布局宽松舒适、无信息拥堵，视觉感受自然"
+            },
+            {
+              "code": "S03",
+              "name": "专业",
+              "status": "pass",
+              "detail": "内容排版有序、信息逻辑清晰，可信度高"
+            },
+            {
+              "code": "S04",
+              "name": "生态",
+              "status": "pass",
+              "detail": "整体风格协调统一、充满喜庆生机，符合活动定位"
+            }
+          ]
+        },
+        "issues": [],
+        "summary": "本次设计稿整体风格符合颁奖典礼的喜庆定位，排版逻辑、信息层级、图文可读性均符合要求，但存在Logo位置、颜色、尺寸不符合品牌规范，以及主标题使用禁用字体的核心问题，需完成整改后才可正式使用。"
+      }
+    },
+    {
+      "file_name": "20260323-105807.jpg",
+      "status": "warning",
+      "score": 85,
+      "report": {
+        "score": 85,
+        "status": "warning",
+        "detection": {
+          "colors": [
+            {
+              "hex": "#E52E29",
+              "name": "新年红",
+              "percent": 60.0
+            },
+            {
+              "hex": "#D4A042",
+              "name": "烫金色",
+              "percent": 25.0
+            },
+            {
+              "hex": "#FFF8F8",
+              "name": "浅粉背景色",
+              "percent": 15.0
+            }
+          ],
+          "logo": {
+            "found": true,
+            "position": "左上角",
+            "position_correct": true,
+            "size_percent": 5.0,
+            "size_correct": null,
+            "color_type": "",
+            "color_correct": false,
+            "safe_margin_ok": null,
+            "deformed": null
+          },
+          "texts": [
+            "科大讯飞 iFLYTEK",
+            "STC 技术中心",
+            "马到成功",
+            "2026",
+            "技术中心祝大家新年快乐，阖家幸福",
+            "Happy New Year",
+            "技术中心11周年"
+          ],
+          "fonts": [
+            {
+              "text": "马到成功、2026",
+              "font_family": "书法装饰字体",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": true
+            },
+            {
+              "text": "技术中心祝大家新年快乐，阖家幸福",
+              "font_family": "黑体",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": false
+            },
+            {
+              "text": "Happy New Year",
+              "font_family": "无衬线英文黑体",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": false
+            },
+            {
+              "text": "品牌标识文字",
+              "font_family": "品牌专用字体",
+              "font_size": "",
+              "font_weight": "",
+              "font_style": "",
+              "is_forbidden": false
+            }
+          ],
+          "layout": {
+            "has_clear_focus": null,
+            "text_on_subject": null,
+            "contrast_sufficient": null,
+            "alignment_correct": null
+          },
+          "style": {
+            "sunshine": {
+              "score": 7,
+              "issues": []
+            },
+            "health": {
+              "score": 7,
+              "issues": []
+            },
+            "professional": {
+              "score": 7,
+              "issues": []
+            },
+            "ecology": {
+              "score": 7,
+              "issues": []
+            }
+          }
+        },
+        "checks": {
+          "logo_checks": [
+            {
+              "code": "L01",
+              "name": "结构完整性",
+              "status": "pass",
+              "detail": "讯飞Logo及联合标识无拉伸、变形、拆改情况，结构完整"
+            },
+            {
+              "code": "L02",
+              "name": "标准色规范",
+              "status": "fail",
+              "detail": "浅色背景下Logo使用了非规范金色，不符合仅允许品牌标准蓝、反白版、墨稿黑的要求"
+            },
+            {
+              "code": "L03",
+              "name": "背景适配",
+              "status": "fail",
+              "detail": "浅色背景应使用Logo原色（标准蓝），当前使用金色不符合适配要求"
+            },
+            {
+              "code": "L04",
+              "name": "位置规范",
+              "status": "pass",
+              "detail": "品牌标识位于画面左上角，符合规范要求"
+            },
+            {
+              "code": "L05",
+              "name": "最小比例",
+              "status": "pass",
+              "detail": "Logo高度约为画面高度的5%，高于要求的4.2%"
+            },
+            {
+              "code": "L06",
+              "name": "安全区",
+              "status": "pass",
+              "detail": "Logo周围无文字、图形侵入，安全间距符合要求"
+            },
+            {
+              "code": "L07",
+              "name": "联合标识",
+              "status": "pass",
+              "detail": "讯飞与技术中心联合标识有清晰分隔，组合关系明确"
+            }
+          ],
+          "color_checks": [
+            {
+              "code": "C01",
+              "name": "色系数量",
+              "status": "pass",
+              "detail": "主色系为红、金、白共3种，符合不超过3种的要求"
+            },
+            {
+              "code": "C02",
+              "name": "配色比例",
+              "status": "pass",
+              "detail": "主色（红60%）、辅助色（金25%）、点缀色（浅白15%）层次清晰，符合配色逻辑"
+            },
+            {
+              "code": "C03",
+              "name": "主色调方向",
+              "status": "pass",
+              "detail": "红金新年配色明亮喜庆，符合阳光、健康、专业、生态的导向"
+            }
+          ],
+          "font_checks": [
+            {
+              "code": "F01",
+              "name": "字体数量",
+              "status": "pass",
+              "detail": "版面使用字体共3种，符合不超过3种的要求"
+            },
+            {
+              "code": "F02",
+              "name": "字体风格",
+              "status": "fail",
+              "detail": "主标题“马到成功”使用了禁用的书法装饰字体，不符合规范要求"
+            }
+          ],
+          "layout_checks": [
+            {
+              "code": "T01",
+              "name": "文本位置",
+              "status": "pass",
+              "detail": "所有文本放置于画面右侧空白区域，未遮挡主体焦点（奔马、飘带）"
+            },
+            {
+              "code": "T02",
+              "name": "信息层级",
+              "status": "pass",
+              "detail": "视觉中心为“马到成功”主标题，依次向下为2026、新年祝福语，层级清晰"
+            },
+            {
+              "code": "T03",
+              "name": "对齐方式",
+              "status": "pass",
+              "detail": "文本均沿统一基准对齐，与版式逻辑一致"
+            },
+            {
+              "code": "T04",
+              "name": "图文反差",
+              "status": "pass",
+              "detail": "红色文字与浅色背景反差足够，可读性良好"
+            }
+          ],
+          "style_checks": [
+            {
+              "code": "S01",
+              "name": "阳光",
+              "status": "pass",
+              "detail": "红金配色明亮喜庆，传递积极向上的新年氛围，无阴暗压抑感"
+            },
+            {
+              "code": "S02",
+              "name": "健康",
+              "status": "pass",
+              "detail": "版面布局宽松舒适，无信息拥堵问题，氛围自然愉悦"
+            },
+            {
+              "code": "S03",
+              "name": "专业",
+              "status": "pass",
+              "detail": "信息排布有序清晰，传递可信的节日祝福，无逻辑混乱问题"
+            },
+            {
+              "code": "S04",
+              "name": "生态",
+              "status": "pass",
+              "detail": "奔马元素与新年氛围搭配协调，充满生机，风格统一"
+            }
+          ]
+        },
+        "issues": [],
+        "summary": "本次设计稿整体合规性较好，排版布局、风格导向均符合品牌要求，存在3项主要问题：Logo颜色不符合规范、浅色背景下Logo适配错误、使用了禁用的书法字体，修改对应问题后即可通过审核。"
+      }
+    }
+  ]
+}
