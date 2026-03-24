@@ -1,20 +1,10 @@
 [
   {
-    "batch_id": "single_20260324_152348_20260323-105807",
-    "time": "2026-03-24 15:23:48",
-    "brand_name": "未命名",
-    "file_name": "20260323-105807.jpg",
-    "file_count": 1,
-    "status": "warning",
-    "score": 72
-  },
-  {
-    "batch_id": "single_20260324_152348_20260323-105800",
-    "time": "2026-03-24 15:23:48",
-    "brand_name": "未命名",
-    "file_name": "20260323-105800.jpg",
-    "file_count": 1,
-    "status": "fail",
-    "score": 40
+    "batch_id": "batch_20260324_161932_fd545c",
+    "time": "2026-03-24 16:19:32",
+    "brand_name": "讯飞品牌设计标准",
+    "file_count": 2,
+    "status": "completed",
+    "score": 75.0
   }
 ]
