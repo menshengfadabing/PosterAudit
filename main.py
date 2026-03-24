@@ -29,9 +29,30 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
-    # 设置全局字体
+    # 设置全局字体 - 跨平台中文字体支持
     font = app.font()
-    font.setFamily("Microsoft YaHei")
+    from PySide6.QtGui import QFontDatabase
+    families = QFontDatabase.families()
+
+    # 按优先级选择中文字体
+    chinese_fonts = [
+        "Noto Sans CJK SC",      # Linux 常用
+        "WenQuanYi Micro Hei",  # Linux 常用
+        "Source Han Sans SC",    # 思源黑体
+        "Microsoft YaHei",       # Windows
+        "SimHei",                # Windows 黑体
+        "PingFang SC",           # macOS
+        "Hiragino Sans GB",      # macOS
+    ]
+
+    for chinese_font in chinese_fonts:
+        if chinese_font in families:
+            font.setFamily(chinese_font)
+            break
+    else:
+        # 如果没有中文字体，使用系统默认字体
+        font.setFamily("Sans Serif")
+
     app.setFont(font)
 
     # 创建主窗口

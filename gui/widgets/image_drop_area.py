@@ -23,10 +23,10 @@ class ImageDropArea(QWidget):
 
     def _init_ui(self):
         self.setAcceptDrops(True)
-        self.setMinimumSize(300, 200)
+        self.setMinimumSize(350, 220)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(15, 15, 15, 15)
 
         # 拖拽提示区域
         self.drop_frame = QFrame()
@@ -34,7 +34,7 @@ class ImageDropArea(QWidget):
         self.drop_frame.setStyleSheet("""
             QFrame {
                 border: 2px dashed #aaa;
-                border-radius: 8px;
+                border-radius: 10px;
                 background-color: #f9f9f9;
             }
             QFrame:hover {
@@ -47,12 +47,12 @@ class ImageDropArea(QWidget):
 
         self.hint_label = QLabel("拖拽图片到此处\n或点击选择图片")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint_label.setStyleSheet("color: #666; font-size: 14px;")
+        self.hint_label.setStyleSheet("color: #666; font-size: 16px;")
         drop_layout.addWidget(self.hint_label)
 
         self.format_label = QLabel("支持格式: PNG, JPG, JPEG, BMP, WEBP")
         self.format_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.format_label.setStyleSheet("color: #999; font-size: 11px;")
+        self.format_label.setStyleSheet("color: #999; font-size: 13px;")
         drop_layout.addWidget(self.format_label)
 
         layout.addWidget(self.drop_frame)
@@ -61,9 +61,11 @@ class ImageDropArea(QWidget):
         btn_layout = QVBoxLayout()
 
         self.select_btn = QPushButton("选择图片")
+        self.select_btn.setStyleSheet("font-size: 15px; padding: 10px;")
         self.select_btn.clicked.connect(self._on_select_clicked)
 
         self.clear_btn = QPushButton("清空")
+        self.clear_btn.setStyleSheet("font-size: 15px; padding: 10px;")
         self.clear_btn.clicked.connect(self.clear_images)
         self.clear_btn.setVisible(False)
 

@@ -1,0 +1,281 @@
+{
+  "batch_id": "single_20260324_152348_20260323-105800",
+  "time": "2026-03-24 15:23:48",
+  "brand_name": "未命名",
+  "file_name": "20260323-105800.jpg",
+  "file_count": 1,
+  "status": "fail",
+  "score": 40,
+  "report": {
+    "score": 40,
+    "status": "fail",
+    "detection": {
+      "colors": [
+        {
+          "hex": "#D81A26",
+          "name": "正红",
+          "percent": 75.0
+        },
+        {
+          "hex": "#E2B648",
+          "name": "金色",
+          "percent": 22.0
+        },
+        {
+          "hex": "#FFFFFF",
+          "name": "白色",
+          "percent": 3.0
+        }
+      ],
+      "logo": {
+        "found": true,
+        "position": "画面左下角",
+        "position_correct": false,
+        "size_percent": 3.5,
+        "size_correct": null,
+        "color_type": "",
+        "color_correct": false,
+        "safe_margin_ok": null,
+        "deformed": null
+      },
+      "texts": [
+        "颁奖典礼",
+        "2025-2026年度技术中心总结&计划报告暨表彰大会",
+        "科大讯飞 iFLYTEK",
+        "致敬每一位奋斗的讯飞人",
+        "成就客户",
+        "简单真诚",
+        "创新坚守",
+        "专业敬业",
+        "团队协作",
+        "担单奋进",
+        "技术中心H1扉客"
+      ],
+      "fonts": [
+        {
+          "text": "颁奖典礼",
+          "font_family": "装饰性艺术字体",
+          "font_size": "",
+          "font_weight": "",
+          "font_style": "",
+          "is_forbidden": true
+        },
+        {
+          "text": "其余所有文字",
+          "font_family": "黑体",
+          "font_size": "",
+          "font_weight": "",
+          "font_style": "",
+          "is_forbidden": false
+        }
+      ],
+      "layout": {
+        "has_clear_focus": null,
+        "text_on_subject": null,
+        "contrast_sufficient": null,
+        "alignment_correct": null
+      },
+      "style": {
+        "sunshine": {
+          "score": 7,
+          "issues": []
+        },
+        "health": {
+          "score": 7,
+          "issues": []
+        },
+        "professional": {
+          "score": 7,
+          "issues": []
+        },
+        "ecology": {
+          "score": 7,
+          "issues": []
+        }
+      }
+    },
+    "checks": {
+      "logo_checks": [
+        {
+          "code": "L01",
+          "name": "结构完整性",
+          "status": "pass",
+          "detail": "科大讯飞Logo结构完整，无拉伸、变形、拆改情况"
+        },
+        {
+          "code": "L02",
+          "name": "标准色规范",
+          "status": "fail",
+          "detail": "Logo使用了非允许的金色，仅允许使用品牌色、反白版、墨稿黑三种形式"
+        },
+        {
+          "code": "L03",
+          "name": "背景适配",
+          "status": "fail",
+          "detail": "当前为红色深色背景，应使用反白版Logo，实际使用了金色版本不符合要求"
+        },
+        {
+          "code": "L04",
+          "name": "位置规范",
+          "status": "fail",
+          "detail": "Logo未放置在画面左上角，实际位于画面左下角，不符合规范要求"
+        },
+        {
+          "code": "L05",
+          "name": "最小比例",
+          "status": "warn",
+          "detail": "Logo高度占画面高度约3.5%，低于要求的4.2%，易出现辨识度不足问题"
+        },
+        {
+          "code": "L06",
+          "name": "安全区",
+          "status": "warn",
+          "detail": "Logo右侧紧邻文字元素，安全区被侵入，不符合规范要求"
+        },
+        {
+          "code": "L07",
+          "name": "联合标识",
+          "status": "pass",
+          "detail": "科大讯飞Logo与周边文字、其他标识有清晰分隔，符合要求"
+        }
+      ],
+      "color_checks": [
+        {
+          "code": "C01",
+          "name": "色系数量",
+          "status": "pass",
+          "detail": "主色系为正红、金色、白色共3种，未超过3种的限制要求"
+        },
+        {
+          "code": "C02",
+          "name": "配色比例",
+          "status": "pass",
+          "detail": "主色正红占比约75%，辅助色金色占比约22%，点缀色白色占比约3%，符合主色、辅助色、点缀色的层次逻辑"
+        },
+        {
+          "code": "C03",
+          "name": "主色调方向",
+          "status": "pass",
+          "detail": "主色调红金搭配明亮喜庆，符合阳光、健康、专业、生态的导向要求"
+        }
+      ],
+      "font_checks": [
+        {
+          "code": "F01",
+          "name": "字体数量",
+          "status": "pass",
+          "detail": "版面仅使用了装饰性艺术字、黑体共2种字体，未超过3种的限制要求"
+        },
+        {
+          "code": "F02",
+          "name": "字体风格",
+          "status": "fail",
+          "detail": "主标题「颁奖典礼」使用了装饰性艺术字体，属于规范禁止使用的字体类型"
+        }
+      ],
+      "layout_checks": [
+        {
+          "code": "T01",
+          "name": "文本位置",
+          "status": "pass",
+          "detail": "所有文本均放置在空白区域，未遮挡中间奖杯、主标题等主体焦点内容"
+        },
+        {
+          "code": "T02",
+          "name": "信息层级",
+          "status": "pass",
+          "detail": "版面视觉中心为居中的「颁奖典礼」主标题与奖杯，次层级为副标题，底部为辅助信息，层级清晰明确"
+        },
+        {
+          "code": "T03",
+          "name": "对齐方式",
+          "status": "pass",
+          "detail": "主副标题居中对齐，底部左侧内容左对齐、底部右侧内容右对齐，与版式逻辑一致"
+        },
+        {
+          "code": "T04",
+          "name": "图文反差",
+          "status": "pass",
+          "detail": "金色文字与红色背景反差充足，所有文字可读性良好"
+        }
+      ],
+      "style_checks": [
+        {
+          "code": "S01",
+          "name": "阳光",
+          "status": "pass",
+          "detail": "画面明亮喜庆，积极向上，无阴暗、压抑、下降感等负向表现"
+        },
+        {
+          "code": "S02",
+          "name": "健康",
+          "status": "pass",
+          "detail": "画面布局开阔舒适，无信息拥堵、过度艰苦等负向表现"
+        },
+        {
+          "code": "S03",
+          "name": "专业",
+          "status": "pass",
+          "detail": "信息排布有序清晰，逻辑通顺，无主体单薄、逻辑混乱等负向表现"
+        },
+        {
+          "code": "S04",
+          "name": "生态",
+          "status": "pass",
+          "detail": "色彩搭配协调温暖，充满生机，无生命力不足、风格不搭等负向表现"
+        }
+      ]
+    },
+    "issues": [
+      {
+        "type": "logo",
+        "severity": "major",
+        "code": "L02",
+        "description": "Logo使用了规范不允许的金色，仅可使用品牌色、反白版、墨稿黑三种形式",
+        "suggestion": "将Logo颜色替换为反白版，适配深色红色背景",
+        "action": ""
+      },
+      {
+        "type": "logo",
+        "severity": "major",
+        "code": "L03",
+        "description": "深色背景下未使用反白版Logo，不符合背景适配要求",
+        "suggestion": "更换为反白版Logo使用",
+        "action": ""
+      },
+      {
+        "type": "logo",
+        "severity": "major",
+        "code": "L04",
+        "description": "Logo未放置在要求的画面左上角位置，实际位于左下角",
+        "suggestion": "将科大讯飞主Logo调整至画面左上角位置",
+        "action": ""
+      },
+      {
+        "type": "logo",
+        "severity": "minor",
+        "code": "L05",
+        "description": "Logo高度占画面比例约3.5%，低于要求的4.2%",
+        "suggestion": "适当放大Logo尺寸，保证高度不低于画面高度的4.2%",
+        "action": ""
+      },
+      {
+        "type": "logo",
+        "severity": "minor",
+        "code": "L06",
+        "description": "Logo周边安全区被文字侵入",
+        "suggestion": "调整Logo周边元素位置，保证Logo安全范围内无其他元素侵入",
+        "action": ""
+      },
+      {
+        "type": "font",
+        "severity": "major",
+        "code": "F02",
+        "description": "主标题使用了规范禁止的装饰性艺术字体",
+        "suggestion": "将主标题替换为规范允许的黑体或宋体类字体",
+        "action": ""
+      }
+    ],
+    "summary": "本次设计稿整体风格符合颁奖典礼的喜庆氛围，排版层级清晰、色彩搭配合理、可读性良好，但存在Logo位置错误、颜色使用违规、主标题使用禁用字体等多项核心规范违反问题，不符合品牌合规要求，需完成整改后才可使用。"
+  }
+}

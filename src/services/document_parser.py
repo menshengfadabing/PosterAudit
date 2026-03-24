@@ -219,13 +219,19 @@ class DocumentParser:
             # 解析Logo
             if data.get("logo"):
                 logo_data = data["logo"]
-                size_range = logo_data.get("size_range", {"min": 5, "max": 15})
+                size_range = logo_data.get("size_range") or {"min": 5, "max": 15}
 
                 if isinstance(size_range, str):
-                    numbers = re.findall(r'(\d+)', size_range)
+                    numbers = re.findall(r'(\d+\.?\d*)', size_range)
                     size_range = {
-                        "min": int(numbers[0]) if numbers else 5,
-                        "max": int(numbers[1]) if len(numbers) > 1 else 15
+                        "min": int(float(numbers[0])) if numbers else 5,
+                        "max": int(float(numbers[1])) if len(numbers) > 1 else 15
+                    }
+                elif isinstance(size_range, dict):
+                    # 确保是整数
+                    size_range = {
+                        "min": int(float(size_range.get("min", 5))),
+                        "max": int(float(size_range.get("max", 15)))
                     }
 
                 rules.logo = LogoRules(

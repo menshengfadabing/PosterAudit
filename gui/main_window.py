@@ -2,9 +2,11 @@
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QListWidget,
-    QStackedWidget, QLabel, QFrame, QStatusBar, QMessageBox, QListWidgetItem
+    QStackedWidget, QLabel, QFrame, QStatusBar, QMessageBox, QListWidgetItem,
+    QSizePolicy
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QFont
 
 from gui.pages import SettingsPage, AuditPage, HistoryPage
 
@@ -16,7 +18,8 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("品牌合规性智能审核平台")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1400, 900)
+        self.resize(1600, 1000)
 
         self._init_ui()
         self._connect_signals()
@@ -43,10 +46,48 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("就绪")
 
+        # 应用全局样式
+        self._apply_global_style()
+
+    def _apply_global_style(self):
+        """应用全局样式"""
+        self.setStyleSheet("""
+            QWidget {
+                font-size: 15px;
+            }
+            QLabel {
+                font-size: 15px;
+            }
+            QPushButton {
+                font-size: 15px;
+                padding: 8px 16px;
+            }
+            QLineEdit {
+                font-size: 15px;
+                padding: 8px;
+            }
+            QTextEdit {
+                font-size: 15px;
+            }
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+            }
+            QTableWidget {
+                font-size: 14px;
+            }
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+            }
+        """)
+
     def _create_sidebar(self) -> QWidget:
         """创建侧边栏"""
         sidebar = QFrame()
-        sidebar.setFixedWidth(200)
+        sidebar.setMinimumWidth(220)
+        sidebar.setMaximumWidth(280)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         sidebar.setStyleSheet("""
             QFrame {
                 background-color: #2c3e50;
@@ -56,10 +97,10 @@ class MainWindow(QMainWindow):
                 background-color: #2c3e50;
                 border: none;
                 color: #ecf0f1;
-                font-size: 14px;
+                font-size: 17px;
             }
             QListWidget::item {
-                padding: 15px 20px;
+                padding: 20px 25px;
                 border: none;
             }
             QListWidget::item:hover {
@@ -81,9 +122,9 @@ class MainWindow(QMainWindow):
         title_label.setStyleSheet("""
             QLabel {
                 color: #ecf0f1;
-                font-size: 18px;
+                font-size: 22px;
                 font-weight: bold;
-                padding: 20px;
+                padding: 25px;
                 background-color: #1a252f;
             }
         """)
@@ -92,16 +133,18 @@ class MainWindow(QMainWindow):
         # 导航列表
         self.nav_list = QListWidget()
         self.nav_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.nav_list.setSpacing(5)
 
         nav_items = [
-            ("设置", "settings"),
-            ("设计审核", "audit"),
-            ("报告历史", "history"),
+            ("⚙️ 系统设置", "settings"),
+            ("🎨 设计审核", "audit"),
+            ("📊 报告历史", "history"),
         ]
 
         for text, key in nav_items:
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, key)
+            item.setSizeHint(QSize(0, 60))  # 更高的导航项
             self.nav_list.addItem(item)
 
         self.nav_list.setCurrentRow(0)
@@ -113,8 +156,8 @@ class MainWindow(QMainWindow):
         version_label.setStyleSheet("""
             QLabel {
                 color: #7f8c8d;
-                font-size: 11px;
-                padding: 10px;
+                font-size: 13px;
+                padding: 15px;
             }
         """)
         layout.addWidget(version_label)
@@ -127,7 +170,7 @@ class MainWindow(QMainWindow):
         content.setStyleSheet("background-color: #f5f6fa;")
 
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(30, 30, 30, 30)
 
         # 堆栈窗口
         self.stack = QStackedWidget()
