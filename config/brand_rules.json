@@ -1,0 +1,46 @@
+{
+  "brand_id": "default",
+  "brand_name": "示例品牌",
+  "version": "1.0",
+  "rules": {
+    "color": {
+      "primary": {
+        "name": "品牌蓝",
+        "value": "#0066CC"
+      },
+      "secondary": [
+        {"name": "浅蓝", "value": "#66B2FF"},
+        {"name": "深蓝", "value": "#003366"}
+      ],
+      "forbidden": [
+        {"name": "金色", "value": "#FFD700", "reason": "不符合品牌调性"}
+      ]
+    },
+    "logo": {
+      "position": "top_left",
+      "position_description": "画面左上角",
+      "size_range": {"min": 5, "max": 15},
+      "safe_margin_px": 20
+    },
+    "font": {
+      "allowed": ["思源黑体", "苹方", "微软雅黑"],
+      "forbidden": ["宋体", "楷体"],
+      "size_rules": {
+        "大标题": "32-48px",
+        "标题": "24-32px",
+        "正文": "14-18px"
+      }
+    },
+    "copywriting": {
+      "forbidden_words": [
+        {"word": "第一", "category": "极限词"},
+        {"word": "最", "category": "极限词"}
+      ],
+      "required_content": []
+    },
+    "layout": {
+      "margin_min": 20,
+      "description": "元素布局应整洁有序，文字不得压在主体焦点区域"
+    }
+  }
+}

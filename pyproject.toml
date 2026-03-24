@@ -1,0 +1,16 @@
+[project]
+name = "check-2"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain-core>=1.2.21",
+    "langchain-openai>=1.1.12",
+    "pillow>=12.1.1",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
+    "pyinstaller>=6.19.0",
+    "pymupdf>=1.27.2.2",
+    "pyside6>=6.11.0",
+    "python-pptx>=1.0.2",
+]
