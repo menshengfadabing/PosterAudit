@@ -23,6 +23,20 @@ from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
+# 支持的文档格式
+SUPPORTED_FORMATS = {
+    # 格式扩展名 -> (解析方法名, 描述)
+    ".pdf": ("_parse_pdf", "PDF文档"),
+    ".ppt": ("_parse_ppt", "PowerPoint演示文稿"),
+    ".pptx": ("_parse_ppt", "PowerPoint演示文稿"),
+    ".doc": ("_parse_word", "Word文档"),
+    ".docx": ("_parse_word", "Word文档"),
+    ".xls": ("_parse_excel", "Excel表格"),
+    ".xlsx": ("_parse_excel", "Excel表格"),
+    ".md": ("_parse_text", "Markdown文档"),
+    ".txt": ("_parse_text", "文本文件"),
+}
+
 
 class DocumentParser:
     """文档解析服务"""
@@ -30,12 +44,13 @@ class DocumentParser:
     def parse(self, file_data: bytes, filename: str) -> BrandRules:
         """解析文档"""
         ext = Path(filename).suffix.lower()
-        if ext == ".pdf":
-            return self._parse_pdf(file_data, filename)
-        elif ext in (".ppt", ".pptx"):
-            return self._parse_ppt(file_data, filename)
-        else:
-            raise ValueError(f"不支持的文档格式: {ext}")
+
+        if ext not in SUPPORTED_FORMATS:
+            raise ValueError(f"不支持的文档格式: {ext}，支持的格式: {', '.join(SUPPORTED_FORMATS.keys())}")
+
+        method_name, _ = SUPPORTED_FORMATS[ext]
+        parse_method = getattr(self, method_name)
+        return parse_method(file_data, filename)
 
     def parse_file(self, file_path: str, brand_name: str = None, progress_callback=None) -> BrandRules:
         """解析本地文件"""
@@ -92,6 +107,178 @@ class DocumentParser:
 
         full_text = "\n\n".join(text_content)
         logger.info(f"PPT解析完成，共{len(prs.slides)}页，{len(full_text)}字符")
+
+        rules = self._extract_rules_with_llm(full_text, filename)
+        rules.raw_text = full_text[:50000]
+
+        return rules
+
+    def _parse_word(self, file_data: bytes, filename: str) -> BrandRules:
+        """解析Word文档 (.doc, .docx)"""
+        logger.info(f"解析Word文档: {filename}")
+
+        ext = Path(filename).suffix.lower()
+        text_content = []
+
+        try:
+            if ext == ".docx":
+                # 使用python-docx解析.docx
+                from docx import Document
+                doc = Document(io.BytesIO(file_data))
+
+                # 提取段落文本
+                for i, para in enumerate(doc.paragraphs):
+                    if para.text.strip():
+                        text_content.append(para.text.strip())
+
+                # 提取表格文本
+                for table_idx, table in enumerate(doc.tables):
+                    table_texts = []
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                        if row_text:
+                            table_texts.append(row_text)
+                    if table_texts:
+                        text_content.append(f"\n=== 表格{table_idx + 1} ===\n" + "\n".join(table_texts))
+
+            else:
+                # .doc格式，尝试使用antiword或直接用python-docx（可能失败）
+                try:
+                    from docx import Document
+                    doc = Document(io.BytesIO(file_data))
+                    for para in doc.paragraphs:
+                        if para.text.strip():
+                            text_content.append(para.text.strip())
+                except Exception as e:
+                    logger.warning(f"解析.doc格式失败，尝试其他方式: {e}")
+                    # 尝试作为纯文本解析
+                    try:
+                        text_content.append(file_data.decode('utf-8', errors='ignore'))
+                    except:
+                        text_content.append(file_data.decode('gbk', errors='ignore'))
+
+        except ImportError:
+            logger.error("未安装python-docx库，无法解析Word文档")
+            raise ImportError("请安装python-docx库: pip install python-docx")
+        except Exception as e:
+            logger.error(f"Word文档解析失败: {e}")
+            raise
+
+        full_text = "\n\n".join(text_content)
+        logger.info(f"Word解析完成，{len(full_text)}字符")
+
+        rules = self._extract_rules_with_llm(full_text, filename)
+        rules.raw_text = full_text[:50000]
+
+        return rules
+
+    def _parse_excel(self, file_data: bytes, filename: str) -> BrandRules:
+        """解析Excel表格 (.xls, .xlsx)"""
+        logger.info(f"解析Excel文档: {filename}")
+
+        ext = Path(filename).suffix.lower()
+        text_content = []
+
+        try:
+            if ext == ".xlsx":
+                # 使用openpyxl解析.xlsx
+                from openpyxl import load_workbook
+                wb = load_workbook(io.BytesIO(file_data), data_only=True)
+
+                for sheet_name in wb.sheetnames:
+                    sheet = wb[sheet_name]
+                    sheet_texts = [f"=== 工作表: {sheet_name} ==="]
+
+                    for row in sheet.iter_rows(values_only=True):
+                        # 过滤空值，转字符串
+                        row_values = [str(cell) if cell is not None else "" for cell in row]
+                        row_text = " | ".join(row_values)
+                        if row_text.strip(" |"):
+                            sheet_texts.append(row_text)
+
+                    if len(sheet_texts) > 1:  # 有内容才添加
+                        text_content.append("\n".join(sheet_texts))
+
+            else:
+                # .xls格式，使用xlrd
+                try:
+                    import xlrd
+                    workbook = xlrd.open_workbook(file_contents=file_data)
+
+                    for sheet in workbook.sheets():
+                        sheet_texts = [f"=== 工作表: {sheet.name} ==="]
+
+                        for row_idx in range(sheet.nrows):
+                            row_values = [str(sheet.cell_value(row_idx, col_idx)) for col_idx in range(sheet.ncols)]
+                            row_text = " | ".join(row_values)
+                            if row_text.strip(" |"):
+                                sheet_texts.append(row_text)
+
+                        if len(sheet_texts) > 1:
+                            text_content.append("\n".join(sheet_texts))
+
+                except ImportError:
+                    logger.warning("未安装xlrd库，尝试用openpyxl解析.xls")
+                    from openpyxl import load_workbook
+                    wb = load_workbook(io.BytesIO(file_data), data_only=True)
+
+                    for sheet_name in wb.sheetnames:
+                        sheet = wb[sheet_name]
+                        sheet_texts = [f"=== 工作表: {sheet_name} ==="]
+
+                        for row in sheet.iter_rows(values_only=True):
+                            row_values = [str(cell) if cell is not None else "" for cell in row]
+                            row_text = " | ".join(row_values)
+                            if row_text.strip(" |"):
+                                sheet_texts.append(row_text)
+
+                        if len(sheet_texts) > 1:
+                            text_content.append("\n".join(sheet_texts))
+
+        except ImportError as e:
+            logger.error(f"缺少必要的库: {e}")
+            raise ImportError("请安装openpyxl库: pip install openpyxl (或 xlrd for .xls)")
+        except Exception as e:
+            logger.error(f"Excel解析失败: {e}")
+            raise
+
+        full_text = "\n\n".join(text_content)
+        logger.info(f"Excel解析完成，{len(full_text)}字符")
+
+        rules = self._extract_rules_with_llm(full_text, filename)
+        rules.raw_text = full_text[:50000]
+
+        return rules
+
+    def _parse_text(self, file_data: bytes, filename: str) -> BrandRules:
+        """解析文本文件 (.txt, .md)"""
+        ext = Path(filename).suffix.lower()
+        logger.info(f"解析文本文档: {filename}")
+
+        # 尝试多种编码
+        encodings = ['utf-8', 'gbk', 'gb2312', 'utf-16']
+        text_content = None
+
+        for encoding in encodings:
+            try:
+                text_content = file_data.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if text_content is None:
+            # 最后尝试忽略错误
+            text_content = file_data.decode('utf-8', errors='ignore')
+
+        full_text = text_content.strip()
+        logger.info(f"文本解析完成，{len(full_text)}字符")
+
+        # 对于Markdown文件，可以做一些简单的格式处理说明
+        if ext == ".md":
+            # 统计标题数量
+            heading_count = len(re.findall(r'^#{1,6}\s', full_text, re.MULTILINE))
+            if heading_count > 0:
+                logger.info(f"检测到{heading_count}个Markdown标题")
 
         rules = self._extract_rules_with_llm(full_text, filename)
         rules.raw_text = full_text[:50000]

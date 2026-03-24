@@ -227,7 +227,7 @@ class SettingsPage(QWidget):
 
         # 上传按钮
         upload_row = QHBoxLayout()
-        self.upload_btn = QPushButton("上传规范文档 (PDF/PPT)")
+        self.upload_btn = QPushButton("上传规范文档 (PDF/PPT/Word/Excel/MD/TXT)")
         self.upload_btn.setMinimumHeight(50)
         self.upload_btn.clicked.connect(self._upload_document)
         self.upload_btn.setStyleSheet("""
@@ -430,7 +430,14 @@ class SettingsPage(QWidget):
         """上传规范文档"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择规范文档", "",
-            "支持的文件 (*.pdf *.pptx *.ppt);;所有文件 (*.*)"
+            "支持的文件 (*.pdf *.pptx *.ppt *.docx *.doc *.xlsx *.xls *.md *.txt);;"
+            "PDF文档 (*.pdf);;"
+            "PowerPoint演示文稿 (*.pptx *.ppt);;"
+            "Word文档 (*.docx *.doc);;"
+            "Excel表格 (*.xlsx *.xls);;"
+            "Markdown文档 (*.md);;"
+            "文本文件 (*.txt);;"
+            "所有文件 (*.*)"
         )
 
         if not file_path:
@@ -469,7 +476,7 @@ class SettingsPage(QWidget):
     def _on_parse_finished(self, rules):
         """解析完成"""
         self.upload_btn.setEnabled(True)
-        self.upload_btn.setText("上传规范文档 (PDF/PPT)")
+        self.upload_btn.setText("上传规范文档 (PDF/PPT/Word/Excel/MD/TXT)")
 
         # 使用用户输入的品牌名称
         if hasattr(self, '_current_brand_name') and self._current_brand_name:
@@ -488,7 +495,7 @@ class SettingsPage(QWidget):
     def _on_parse_error(self, error_msg):
         """解析失败"""
         self.upload_btn.setEnabled(True)
-        self.upload_btn.setText("上传规范文档 (PDF/PPT)")
+        self.upload_btn.setText("上传规范文档 (PDF/PPT/Word/Excel/MD/TXT)")
         QMessageBox.critical(self, "错误", f"解析失败: {error_msg}")
 
     def _new_rules(self):
