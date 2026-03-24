@@ -1,20 +1,24 @@
-"""审核页面 - 单图审核"""
+"""审核页面 - 单图/批量审核"""
 
 import json
 from pathlib import Path
 from datetime import datetime
+import uuid
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QMessageBox, QSplitter, QFrame, QTextEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar
+    QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
+    QTabWidget, QComboBox, QCheckBox, QFileDialog, QScrollArea,
+    QGridLayout, QSpinBox
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPixmap
 
 from gui.widgets import ImageDropArea
 from gui.utils import Worker
 from src.services.audit_service import audit_service
 from src.services.rules_context import rules_context
+from src.utils.config import get_app_dir
 
 
 class AuditPage(QWidget):
@@ -27,28 +31,108 @@ class AuditPage(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
 
         # 标题
         title = QLabel("设计稿审核")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(title)
 
-        # 说明
-        desc = QLabel("对设计稿进行完整的品牌合规审核")
-        desc.setStyleSheet("color: #7f8c8d;")
-        layout.addWidget(desc)
+        # 提示信息
+        hint = QLabel("对设计稿进行完整的品牌合规审核，支持单图和批量审核")
+        hint.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        layout.addWidget(hint)
 
-        # 主分割器
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        layout.addWidget(splitter, 1)
+        # 标签页
+        tab_widget = QTabWidget()
+        tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background-color: white;
+                font-size: 15px;
+            }
+            QTabBar::tab {
+                padding: 12px 30px;
+                margin-right: 2px;
+                background-color: #ecf0f1;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-size: 15px;
+            }
+            QTabBar::tab:selected {
+                background-color: white;
+                font-weight: bold;
+            }
+        """)
+
+        # 单图审核标签
+        single_tab = self._create_single_audit_tab()
+        tab_widget.addTab(single_tab, "单图审核")
+
+        # 批量审核标签
+        batch_tab = self._create_batch_audit_tab()
+        tab_widget.addTab(batch_tab, "批量审核")
+
+        layout.addWidget(tab_widget)
+
+    def _create_single_audit_tab(self) -> QWidget:
+        """创建单图审核标签页"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(25)
 
         # 左侧：设置区域
         left_panel = QFrame()
+        left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
+        left_panel.setMinimumWidth(400)
+        left_panel.setMaximumWidth(450)
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setSpacing(18)
+
+        # 品牌选择
+        brand_group = QGroupBox("审核设置")
+        brand_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        """)
+        brand_layout = QVBoxLayout(brand_group)
+
+        brand_row = QHBoxLayout()
+        brand_label = QLabel("品牌规范:")
+        brand_label.setStyleSheet("font-size: 15px;")
+        brand_row.addWidget(brand_label)
+        self.brand_combo = QComboBox()
+        self.brand_combo.setMinimumWidth(250)
+        self.brand_combo.setStyleSheet("font-size: 15px; padding: 8px;")
+        self._load_brand_list()
+        brand_row.addWidget(self.brand_combo)
+        brand_layout.addLayout(brand_row)
+
+        # 刷新按钮
+        refresh_row = QHBoxLayout()
+        refresh_btn = QPushButton("刷新品牌列表")
+        refresh_btn.setStyleSheet("font-size: 15px;")
+        refresh_btn.clicked.connect(self._load_brand_list)
+        refresh_row.addWidget(refresh_btn)
+        refresh_row.addStretch()
+        brand_layout.addLayout(refresh_row)
+
+        left_layout.addWidget(brand_group)
 
         # 图片选择
         image_group = QGroupBox("设计稿图片")
+        image_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        """)
         image_layout = QVBoxLayout(image_group)
         self.image_drop = ImageDropArea()
         self.image_drop.image_selected.connect(self._on_image_selected)
@@ -60,14 +144,15 @@ class AuditPage(QWidget):
         self.audit_btn = QPushButton("开始审核")
         self.audit_btn.clicked.connect(self._on_audit)
         self.audit_btn.setEnabled(False)
+        self.audit_btn.setMinimumHeight(50)
         self.audit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #27ae60;
                 color: white;
-                padding: 12px 40px;
+                padding: 15px 50px;
                 border: none;
                 border-radius: 5px;
-                font-size: 14px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -77,9 +162,7 @@ class AuditPage(QWidget):
                 background-color: #bdc3c7;
             }
         """)
-        btn_layout.addStretch()
         btn_layout.addWidget(self.audit_btn)
-        btn_layout.addStretch()
         left_layout.addLayout(btn_layout)
 
         # 进度
@@ -88,66 +171,104 @@ class AuditPage(QWidget):
         left_layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #7f8c8d;")
+        self.status_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        self.status_label.setWordWrap(True)
         left_layout.addWidget(self.status_label)
 
         left_layout.addStretch()
-        splitter.addWidget(left_panel)
+        layout.addWidget(left_panel)
 
         # 右侧：结果展示
         right_panel = QFrame()
+        right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
         right_layout = QVBoxLayout(right_panel)
 
         # 结果标题
         result_title = QLabel("审核结果")
-        result_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        result_title.setStyleSheet("font-size: 18px; font-weight: bold;")
         right_layout.addWidget(result_title)
 
         # 评分区域
         score_frame = QFrame()
-        score_frame.setStyleSheet("background-color: #ecf0f1; border-radius: 10px; padding: 15px;")
-        score_layout = QVBoxLayout(score_frame)
+        score_frame.setStyleSheet("background-color: #ecf0f1; border-radius: 10px; padding: 20px;")
+        score_layout = QGridLayout(score_frame)
 
-        score_row = QHBoxLayout()
         self.score_label = QLabel("--")
-        self.score_label.setStyleSheet("font-size: 48px; font-weight: bold; color: #2c3e50;")
-        score_row.addWidget(self.score_label)
+        self.score_label.setStyleSheet("font-size: 56px; font-weight: bold; color: #2c3e50;")
+        score_layout.addWidget(self.score_label, 0, 0)
 
         self.score_suffix = QLabel("/100")
-        self.score_suffix.setStyleSheet("font-size: 24px; color: #7f8c8d;")
-        score_row.addWidget(self.score_suffix)
-        score_row.addStretch()
+        self.score_suffix.setStyleSheet("font-size: 28px; color: #7f8c8d;")
+        score_layout.addWidget(self.score_suffix, 0, 1)
 
         self.status_badge = QLabel("")
-        self.status_badge.setStyleSheet("padding: 8px 16px; border-radius: 15px; font-weight: bold;")
-        score_row.addWidget(self.status_badge)
+        self.status_badge.setStyleSheet("padding: 10px 20px; border-radius: 15px; font-weight: bold; font-size: 15px;")
+        score_layout.addWidget(self.status_badge, 0, 2)
 
-        score_layout.addLayout(score_row)
-
-        self.summary_label = QLabel("")
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet("color: #34495e; margin-top: 10px;")
-        score_layout.addWidget(self.summary_label)
+        self.issue_count_label = QLabel("问题数: --")
+        self.issue_count_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        score_layout.addWidget(self.issue_count_label, 1, 0, 1, 3)
 
         right_layout.addWidget(score_frame)
 
+        # 创建滚动区域显示详细结果
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        self.result_widget = QWidget()
+        self.result_layout = QVBoxLayout(self.result_widget)
+        self.result_layout.setSpacing(12)
+
+        # 摘要
+        self.summary_label = QLabel("")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet("color: #34495e; padding: 15px; background-color: #f8f9fa; border-radius: 5px; font-size: 14px;")
+        self.summary_label.setVisible(False)
+        self.result_layout.addWidget(self.summary_label)
+
+        # 检测结果标题
+        detection_title = QLabel("检测结果")
+        detection_title.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
+        detection_title.setVisible(False)
+        self.result_layout.addWidget(detection_title)
+        self.detection_title = detection_title
+
+        # 检测结果内容
+        self.detection_content = QLabel("")
+        self.detection_content.setWordWrap(True)
+        self.detection_content.setStyleSheet("padding: 15px; background-color: #f0f7ff; border-radius: 5px; font-size: 14px;")
+        self.detection_content.setVisible(False)
+        self.result_layout.addWidget(self.detection_content)
+
         # 问题列表
-        issues_group = QGroupBox("问题列表")
-        issues_layout = QVBoxLayout(issues_group)
+        issues_title = QLabel("问题列表")
+        issues_title.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
+        issues_title.setVisible(False)
+        self.result_layout.addWidget(issues_title)
+        self.issues_title = issues_title
+
         self.issues_table = QTableWidget()
         self.issues_table.setColumnCount(4)
         self.issues_table.setHorizontalHeaderLabels(["类型", "严重程度", "描述", "建议"])
         self.issues_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        issues_layout.addWidget(self.issues_table)
-        right_layout.addWidget(issues_group, 1)
+        self.issues_table.setStyleSheet("font-size: 14px;")
+        self.issues_table.setVisible(False)
+        self.result_layout.addWidget(self.issues_table)
+
+        self.result_layout.addStretch()
+        scroll.setWidget(self.result_widget)
+        right_layout.addWidget(scroll, 1)
 
         # 导出按钮
         export_layout = QHBoxLayout()
         self.export_json_btn = QPushButton("导出JSON")
+        self.export_json_btn.setStyleSheet("font-size: 15px;")
         self.export_json_btn.clicked.connect(lambda: self._on_export("json"))
         self.export_json_btn.setEnabled(False)
 
         self.export_md_btn = QPushButton("导出Markdown")
+        self.export_md_btn.setStyleSheet("font-size: 15px;")
         self.export_md_btn.clicked.connect(lambda: self._on_export("md"))
         self.export_md_btn.setEnabled(False)
 
@@ -156,11 +277,175 @@ class AuditPage(QWidget):
         export_layout.addWidget(self.export_md_btn)
         right_layout.addLayout(export_layout)
 
-        splitter.addWidget(right_panel)
-        splitter.setSizes([400, 600])
+        layout.addWidget(right_panel, 1)
+
+        return widget
+
+    def _create_batch_audit_tab(self) -> QWidget:
+        """创建批量审核标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(18)
+
+        # 提示信息
+        hint_frame = QFrame()
+        hint_frame.setStyleSheet("background-color: #FEF3C7; border-radius: 8px; padding: 15px;")
+        hint_layout = QVBoxLayout(hint_frame)
+        hint_label = QLabel("批量审核性能预估：10张图约需 15-20秒 | 50张图约需 1-2分钟 | 100张图约需 2-4分钟")
+        hint_label.setStyleSheet("color: #92400E; font-size: 14px;")
+        hint_layout.addWidget(hint_label)
+        layout.addWidget(hint_frame)
+
+        # 设置区域
+        settings_group = QGroupBox("批量审核设置")
+        settings_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        """)
+        settings_layout = QGridLayout(settings_group)
+
+        # 品牌选择
+        brand_label = QLabel("品牌规范:")
+        brand_label.setStyleSheet("font-size: 15px;")
+        settings_layout.addWidget(brand_label, 0, 0)
+        self.batch_brand_combo = QComboBox()
+        self.batch_brand_combo.setMinimumWidth(300)
+        self.batch_brand_combo.setStyleSheet("font-size: 15px; padding: 8px;")
+        self._load_batch_brand_list()
+        settings_layout.addWidget(self.batch_brand_combo, 0, 1)
+
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setStyleSheet("font-size: 15px;")
+        refresh_btn.clicked.connect(self._load_batch_brand_list)
+        settings_layout.addWidget(refresh_btn, 0, 2)
+
+        layout.addWidget(settings_group)
+
+        # 图片上传区域
+        upload_group = QGroupBox("图片上传")
+        upload_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        """)
+        upload_layout = QVBoxLayout(upload_group)
+
+        # 多图选择
+        self.multi_image_drop = ImageDropArea(multi_select=True, max_images=100)
+        self.multi_image_drop.images_selected.connect(self._on_multi_images_selected)
+        upload_layout.addWidget(self.multi_image_drop)
+
+        # 文件计数
+        self.file_count_label = QLabel("已选择 0 张图片")
+        self.file_count_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        upload_layout.addWidget(self.file_count_label)
+
+        layout.addWidget(upload_group)
+
+        # 操作按钮
+        btn_layout = QHBoxLayout()
+        self.batch_audit_btn = QPushButton("开始批量审核")
+        self.batch_audit_btn.clicked.connect(self._on_batch_audit)
+        self.batch_audit_btn.setEnabled(False)
+        self.batch_audit_btn.setMinimumHeight(50)
+        self.batch_audit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #219a52;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.batch_audit_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # 进度显示
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setVisible(False)
+        layout.addWidget(self.batch_progress_bar)
+
+        self.batch_status_label = QLabel("")
+        self.batch_status_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        layout.addWidget(self.batch_status_label)
+
+        # 批量结果预览（简化版）
+        self.batch_result_group = QGroupBox("审核结果")
+        self.batch_result_group.setVisible(False)
+        self.batch_result_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        """)
+        batch_result_layout = QVBoxLayout(self.batch_result_group)
+
+        self.batch_summary_label = QLabel("")
+        self.batch_summary_label.setStyleSheet("font-size: 15px;")
+        batch_result_layout.addWidget(self.batch_summary_label)
+
+        self.batch_result_list = QTextEdit()
+        self.batch_result_list.setReadOnly(True)
+        self.batch_result_list.setMaximumHeight(200)
+        self.batch_result_list.setStyleSheet("font-size: 14px;")
+        batch_result_layout.addWidget(self.batch_result_list)
+
+        # 批量导出按钮
+        batch_export_layout = QHBoxLayout()
+        self.batch_export_json_btn = QPushButton("导出JSON")
+        self.batch_export_json_btn.setStyleSheet("font-size: 15px;")
+        self.batch_export_json_btn.clicked.connect(lambda: self._on_batch_export("json"))
+        batch_export_layout.addStretch()
+        batch_export_layout.addWidget(self.batch_export_json_btn)
+        batch_result_layout.addLayout(batch_export_layout)
+
+        layout.addWidget(self.batch_result_group)
+
+        layout.addStretch()
+        return widget
+
+    def _load_brand_list(self):
+        """加载品牌列表"""
+        self.brand_combo.clear()
+        self.brand_combo.addItem("默认规范", None)
+
+        rules_list = rules_context.list_rules()
+        for rule in rules_list:
+            brand_id = rule.get("brand_id", "")
+            brand_name = rule.get("brand_name", "未命名")
+            self.brand_combo.addItem(f"{brand_name}", brand_id)
+
+    def _load_batch_brand_list(self):
+        """加载批量审核品牌列表"""
+        self.batch_brand_combo.clear()
+        self.batch_brand_combo.addItem("默认规范", None)
+
+        rules_list = rules_context.list_rules()
+        for rule in rules_list:
+            brand_id = rule.get("brand_id", "")
+            brand_name = rule.get("brand_name", "未命名")
+            self.batch_brand_combo.addItem(f"{brand_name}", brand_id)
 
     def _on_image_selected(self, image_path: str):
         self.audit_btn.setEnabled(bool(image_path))
+
+    def _on_multi_images_selected(self, image_paths: list):
+        self.file_count_label.setText(f"已选择 {len(image_paths)} 张图片")
+        self.batch_audit_btn.setEnabled(len(image_paths) > 0)
 
     def _on_audit(self):
         """开始审核"""
@@ -168,20 +453,22 @@ class AuditPage(QWidget):
         if not image_path:
             return
 
+        brand_id = self.brand_combo.currentData()
+
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        self.status_label.setText("正在审核...")
+        self.status_label.setText("正在审核（可能需要1-2分钟）...")
         self.audit_btn.setEnabled(False)
 
         # 后台任务
-        self.worker = Worker(self._run_audit, image_path)
+        self.worker = Worker(self._run_audit, image_path, brand_id)
         self.worker.finished_signal.connect(self._on_audit_finished)
         self.worker.error_signal.connect(self._on_audit_error)
         self.worker.start()
 
-    def _run_audit(self, image_path: str, progress_callback=None):
+    def _run_audit(self, image_path: str, brand_id: str, progress_callback=None):
         """执行审核"""
-        return audit_service.audit_file(image_path)
+        return audit_service.audit_file(image_path, brand_id)
 
     def _on_audit_finished(self, report):
         """审核完成"""
@@ -192,6 +479,9 @@ class AuditPage(QWidget):
         self.audit_btn.setEnabled(True)
         self.export_json_btn.setEnabled(True)
         self.export_md_btn.setEnabled(True)
+
+        # 保存到历史
+        self._save_to_history(report)
 
         self._display_result(report)
 
@@ -223,50 +513,149 @@ class AuditPage(QWidget):
             font-weight: bold;
         """)
 
+        # 问题数量
+        issues = report.issues
+        critical = len([i for i in issues if i.severity.value == "critical"])
+        major = len([i for i in issues if i.severity.value == "major"])
+        minor = len([i for i in issues if i.severity.value == "minor"])
+        self.issue_count_label.setText(f"问题数: {len(issues)}个 (严重:{critical} 主要:{major} 次要:{minor})")
+
         # 摘要
-        self.summary_label.setText(report.summary)
+        if report.summary:
+            self.summary_label.setText(f"📝 总体评价: {report.summary}")
+            self.summary_label.setVisible(True)
+        else:
+            self.summary_label.setVisible(False)
+
+        # 检测结果
+        detection = report.detection
+        detection_parts = []
+
+        # 颜色检测
+        if detection.colors:
+            colors_text = " ".join([f"<span style='background-color:{c.hex};color:white;padding:2px 6px;border-radius:3px;'>{c.hex}</span> {c.name} ({c.percent:.1f}%)" for c in detection.colors[:5]])
+            detection_parts.append(f"<b>颜色:</b> {colors_text}")
+
+        # Logo检测
+        if detection.logo:
+            logo_text = f"<b>Logo:</b> {'已检测到' if detection.logo.found else '未检测到'}"
+            if detection.logo.found:
+                logo_text += f" | 位置: {detection.logo.position or '未知'} | 尺寸: {detection.logo.size_percent or 0:.1f}%"
+            detection_parts.append(logo_text)
+
+        # 文字检测
+        if detection.texts:
+            texts_preview = "、".join(detection.texts[:5])
+            if len(detection.texts) > 5:
+                texts_preview += f" 等{len(detection.texts)}条"
+            detection_parts.append(f"<b>文字:</b> {texts_preview}")
+
+        # 字体检测
+        if detection.fonts:
+            fonts_text = "、".join([f.font_family for f in detection.fonts[:3] if f.font_family])
+            if fonts_text:
+                detection_parts.append(f"<b>字体:</b> {fonts_text}")
+
+        if detection_parts:
+            self.detection_content.setText("<br>".join(detection_parts))
+            self.detection_content.setVisible(True)
+            self.detection_title.setVisible(True)
+        else:
+            self.detection_content.setVisible(False)
+            self.detection_title.setVisible(False)
 
         # 问题列表
-        issues = report.issues
-        self.issues_table.setRowCount(len(issues))
+        if issues:
+            self.issues_table.setRowCount(len(issues))
+            self.issues_table.setVisible(True)
+            self.issues_title.setVisible(True)
 
-        severity_map = {
-            'critical': '严重',
-            'major': '主要',
-            'minor': '次要'
+            severity_map = {
+                'critical': '严重',
+                'major': '主要',
+                'minor': '次要'
+            }
+
+            severity_colors = {
+                'critical': '#e74c3c',
+                'major': '#f39c12',
+                'minor': '#3498db'
+            }
+
+            for row, issue in enumerate(issues):
+                self.issues_table.setItem(row, 0, QTableWidgetItem(issue.type.value.upper()))
+
+                severity_text = severity_map.get(issue.severity.value, issue.severity.value)
+                severity_item = QTableWidgetItem(severity_text)
+                severity_item.setForeground(QColor(severity_colors.get(issue.severity.value, '#95a5a6')))
+                self.issues_table.setItem(row, 1, severity_item)
+
+                self.issues_table.setItem(row, 2, QTableWidgetItem(issue.description))
+                self.issues_table.setItem(row, 3, QTableWidgetItem(issue.suggestion))
+        else:
+            self.issues_table.setVisible(False)
+            self.issues_title.setVisible(False)
+
+    def _save_to_history(self, report):
+        """保存审核结果到历史"""
+        history_dir = get_app_dir() / "data" / "audit_history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        batch_id = f"single_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+
+        history_data = {
+            "batch_id": batch_id,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "brand_name": self.brand_combo.currentText(),
+            "file_name": Path(self.image_drop.get_first_image()).name if self.image_drop.get_first_image() else "",
+            "file_count": 1,
+            "status": report.status.value,
+            "score": report.score,
+            "report": json.loads(report.to_json())
         }
 
-        severity_colors = {
-            'critical': '#e74c3c',
-            'major': '#f39c12',
-            'minor': '#3498db'
-        }
+        # 保存报告文件
+        report_file = history_dir / f"{batch_id}.json"
+        with open(report_file, "w", encoding="utf-8") as f:
+            json.dump(history_data, f, ensure_ascii=False, indent=2)
 
-        for row, issue in enumerate(issues):
-            # 类型
-            self.issues_table.setItem(row, 0, QTableWidgetItem(issue.type.value.upper()))
+        # 更新历史索引
+        index_file = history_dir / "history_index.json"
+        history_list = []
+        if index_file.exists():
+            with open(index_file, "r", encoding="utf-8") as f:
+                history_list = json.load(f)
 
-            # 严重程度
-            severity_text = severity_map.get(issue.severity.value, issue.severity.value)
-            severity_item = QTableWidgetItem(severity_text)
-            severity_item.setForeground(QColor(severity_colors.get(issue.severity.value, '#95a5a6')))
-            self.issues_table.setItem(row, 1, severity_item)
+        history_list.insert(0, {
+            "batch_id": batch_id,
+            "time": history_data["time"],
+            "brand_name": history_data["brand_name"],
+            "file_name": history_data["file_name"],
+            "file_count": 1,
+            "status": history_data["status"],
+            "score": history_data["score"],
+        })
 
-            # 描述
-            self.issues_table.setItem(row, 2, QTableWidgetItem(issue.description))
+        # 只保留最近100条
+        history_list = history_list[:100]
 
-            # 建议
-            self.issues_table.setItem(row, 3, QTableWidgetItem(issue.suggestion))
+        with open(index_file, "w", encoding="utf-8") as f:
+            json.dump(history_list, f, ensure_ascii=False, indent=2)
 
     def _on_export(self, format_type: str):
         """导出报告"""
         if not self.audit_result:
             return
 
+        export_dir = get_app_dir() / "data" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
         if format_type == "json":
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "导出JSON报告",
-                f"audit_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                str(export_dir / f"audit_report_{timestamp}.json"),
                 "JSON文件 (*.json)"
             )
             if file_path:
@@ -277,7 +666,7 @@ class AuditPage(QWidget):
         else:  # markdown
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "导出Markdown报告",
-                f"audit_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                str(export_dir / f"audit_report_{timestamp}.md"),
                 "Markdown文件 (*.md)"
             )
             if file_path:
@@ -328,3 +717,175 @@ class AuditPage(QWidget):
                     lines.append(f"  - 建议: {issue.suggestion}")
 
         return "\n".join(lines)
+
+    def _on_batch_audit(self):
+        """批量审核"""
+        image_paths = self.multi_image_drop.get_image_paths()
+        if not image_paths:
+            return
+
+        brand_id = self.batch_brand_combo.currentData()
+
+        self.batch_progress_bar.setVisible(True)
+        self.batch_progress_bar.setRange(0, len(image_paths))
+        self.batch_progress_bar.setValue(0)
+        self.batch_status_label.setText("正在审核...")
+        self.batch_audit_btn.setEnabled(False)
+        self.batch_result_group.setVisible(False)
+
+        # 后台任务
+        self._batch_worker = Worker(self._run_batch_audit, image_paths, brand_id)
+        self._batch_worker.finished_signal.connect(self._on_batch_finished)
+        self._batch_worker.error_signal.connect(self._on_batch_error)
+        self._batch_worker.progress_signal.connect(self._on_batch_progress)
+        self._batch_worker.start()
+
+    def _run_batch_audit(self, image_paths: list, brand_id: str, progress_callback=None):
+        """执行批量审核"""
+        results = []
+        for i, path in enumerate(image_paths):
+            try:
+                report = audit_service.audit_file(path, brand_id)
+                results.append({
+                    "file_name": Path(path).name,
+                    "status": report.status.value,
+                    "score": report.score,
+                    "report": json.loads(report.to_json())
+                })
+            except Exception as e:
+                results.append({
+                    "file_name": Path(path).name,
+                    "status": "error",
+                    "error": str(e)
+                })
+
+            if progress_callback:
+                progress_callback(i + 1, f"已完成 {i+1}/{len(image_paths)}")
+
+        return results
+
+    def _on_batch_progress(self, current: int, message: str):
+        """批量审核进度"""
+        self.batch_progress_bar.setValue(current)
+        self.batch_status_label.setText(message)
+
+    def _on_batch_finished(self, results: list):
+        """批量审核完成"""
+        self.batch_progress_bar.setVisible(False)
+        self.batch_audit_btn.setEnabled(True)
+        self.batch_result_group.setVisible(True)
+
+        # 计算摘要
+        total = len(results)
+        pass_count = len([r for r in results if r.get("status") == "pass"])
+        warning_count = len([r for r in results if r.get("status") == "warning"])
+        fail_count = len([r for r in results if r.get("status") == "fail"])
+        error_count = len([r for r in results if r.get("status") == "error"])
+
+        scores = [r.get("score", 0) for r in results if r.get("score") is not None]
+        avg_score = sum(scores) / len(scores) if scores else 0
+
+        self.batch_summary_label.setText(
+            f"总数: {total} | 通过: {pass_count} | 警告: {warning_count} | 失败: {fail_count} | 错误: {error_count} | 平均分: {avg_score:.1f}"
+        )
+
+        # 结果列表
+        result_lines = []
+        for r in results:
+            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(r.get("status"), "❓")
+            result_lines.append(f"{status_icon} {r.get('file_name')} - 分数: {r.get('score', 'N/A')}")
+
+        self.batch_result_list.setText("\n".join(result_lines))
+        self.batch_status_label.setText("批量审核完成!")
+
+        # 保存批量结果
+        self._last_batch_results = results
+
+        # 保存到历史
+        self._save_batch_to_history(results)
+
+    def _on_batch_error(self, error: str):
+        """批量审核失败"""
+        self.batch_progress_bar.setVisible(False)
+        self.batch_audit_btn.setEnabled(True)
+        self.batch_status_label.setText(f"批量审核失败: {error}")
+        QMessageBox.critical(self, "错误", f"批量审核失败:\n{error}")
+
+    def _save_batch_to_history(self, results: list):
+        """保存批量审核结果到历史"""
+        history_dir = get_app_dir() / "data" / "audit_history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+
+        pass_count = len([r for r in results if r.get("status") == "pass"])
+        warning_count = len([r for r in results if r.get("status") == "warning"])
+        fail_count = len([r for r in results if r.get("status") == "fail"])
+
+        scores = [r.get("score", 0) for r in results if r.get("score") is not None]
+        avg_score = sum(scores) / len(scores) if scores else 0
+
+        history_data = {
+            "batch_id": batch_id,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "brand_name": self.batch_brand_combo.currentText(),
+            "file_count": len(results),
+            "status": "completed",
+            "summary": {
+                "total": len(results),
+                "pass_count": pass_count,
+                "warning_count": warning_count,
+                "fail_count": fail_count,
+                "average_score": round(avg_score, 1)
+            },
+            "results": results
+        }
+
+        report_file = history_dir / f"{batch_id}.json"
+        with open(report_file, "w", encoding="utf-8") as f:
+            json.dump(history_data, f, ensure_ascii=False, indent=2)
+
+        # 更新历史索引
+        index_file = history_dir / "history_index.json"
+        history_list = []
+        if index_file.exists():
+            with open(index_file, "r", encoding="utf-8") as f:
+                history_list = json.load(f)
+
+        history_list.insert(0, {
+            "batch_id": batch_id,
+            "time": history_data["time"],
+            "brand_name": history_data["brand_name"],
+            "file_count": len(results),
+            "status": "completed",
+            "score": round(avg_score, 1),
+        })
+
+        history_list = history_list[:100]
+
+        with open(index_file, "w", encoding="utf-8") as f:
+            json.dump(history_list, f, ensure_ascii=False, indent=2)
+
+    def _on_batch_export(self, format_type: str):
+        """导出批量报告"""
+        if not hasattr(self, '_last_batch_results') or not self._last_batch_results:
+            return
+
+        export_dir = get_app_dir() / "data" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        if format_type == "json":
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "导出批量JSON报告",
+                str(export_dir / f"batch_report_{timestamp}.json"),
+                "JSON文件 (*.json)"
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "results": self._last_batch_results
+                    }, f, ensure_ascii=False, indent=2)
+                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")

@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QGroupBox, QFileDialog, QMessageBox, QTextEdit, QComboBox
+    QGroupBox, QFileDialog, QMessageBox, QTextEdit, QComboBox, QTabWidget,
+    QScrollArea, QFrame, QGridLayout
 )
 from PySide6.QtCore import Qt
 
@@ -12,6 +13,7 @@ from src.utils.config import settings, get_app_dir
 from src.services.llm_service import llm_service
 from src.services.rules_context import rules_context
 from src.services.document_parser import document_parser
+from gui.utils.worker import Worker
 
 
 class SettingsPage(QWidget):
@@ -24,122 +26,250 @@ class SettingsPage(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
 
         # 标题
-        title = QLabel("设置")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;")
+        title = QLabel("系统设置")
+        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(title)
 
-        # API配置
-        api_group = QGroupBox("API配置")
-        api_layout = QVBoxLayout(api_group)
+        # 标签页
+        tab_widget = QTabWidget()
+        tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background-color: white;
+                font-size: 15px;
+            }
+            QTabBar::tab {
+                padding: 12px 30px;
+                margin-right: 2px;
+                background-color: #ecf0f1;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-size: 15px;
+            }
+            QTabBar::tab:selected {
+                background-color: white;
+                font-weight: bold;
+            }
+        """)
+
+        # API配置标签
+        api_tab = self._create_api_tab()
+        tab_widget.addTab(api_tab, "API配置")
+
+        # 规范管理标签
+        rules_tab = self._create_rules_tab()
+        tab_widget.addTab(rules_tab, "规范管理")
+
+        layout.addWidget(tab_widget)
+
+    def _create_api_tab(self) -> QWidget:
+        """创建API配置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(25)
+
+        # API配置组
+        api_group = QGroupBox("API 配置")
+        api_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        api_layout = QGridLayout(api_group)
+        api_layout.setSpacing(20)
 
         # API Key
-        key_layout = QHBoxLayout()
-        key_layout.addWidget(QLabel("API Key:"))
+        api_key_label = QLabel("API Key:")
+        api_key_label.setStyleSheet("font-size: 15px;")
+        api_layout.addWidget(api_key_label, 0, 0)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_edit.setPlaceholderText("输入API密钥...")
-        key_layout.addWidget(self.api_key_edit)
-        api_layout.addLayout(key_layout)
+        self.api_key_edit.setMinimumWidth(500)
+        api_layout.addWidget(self.api_key_edit, 0, 1)
 
         # API Base
-        base_layout = QHBoxLayout()
-        base_layout.addWidget(QLabel("API地址:"))
+        api_base_label = QLabel("API 地址:")
+        api_base_label.setStyleSheet("font-size: 15px;")
+        api_layout.addWidget(api_base_label, 1, 0)
         self.api_base_edit = QLineEdit()
-        self.api_base_edit.setText(settings.openai_api_base)
-        base_layout.addWidget(self.api_base_edit)
-        api_layout.addLayout(base_layout)
+        self.api_base_edit.setMinimumWidth(500)
+        api_layout.addWidget(self.api_base_edit, 1, 1)
 
         # Model
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("模型:"))
+        model_label = QLabel("模型名称:")
+        model_label.setStyleSheet("font-size: 15px;")
+        api_layout.addWidget(model_label, 2, 0)
         self.model_edit = QLineEdit()
-        self.model_edit.setText(settings.doubao_model)
-        model_layout.addWidget(self.model_edit)
-        api_layout.addLayout(model_layout)
+        api_layout.addWidget(self.model_edit, 2, 1)
 
         # 保存按钮
-        save_api_btn = QPushButton("保存API配置")
+        save_api_btn = QPushButton("保存配置")
+        save_api_btn.setMinimumWidth(150)
         save_api_btn.clicked.connect(self._save_api_config)
         save_api_btn.setStyleSheet("""
             QPushButton {
                 background-color: #3498db;
                 color: white;
-                padding: 8px 20px;
+                padding: 12px 40px;
                 border: none;
-                border-radius: 4px;
+                border-radius: 5px;
+                font-size: 15px;
             }
             QPushButton:hover {
                 background-color: #2980b9;
             }
         """)
-        api_layout.addWidget(save_api_btn)
+        api_layout.addWidget(save_api_btn, 3, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
 
         layout.addWidget(api_group)
 
-        # 品牌规范管理
-        rules_group = QGroupBox("品牌规范管理")
-        rules_layout = QVBoxLayout(rules_group)
+        # 高级设置组
+        advanced_group = QGroupBox("高级设置")
+        advanced_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+        """)
+        advanced_layout = QVBoxLayout(advanced_group)
 
-        # 规范选择
+        # 缓存设置
+        cache_info = QLabel("审核结果缓存可加速重复图片的审核速度")
+        cache_info.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        advanced_layout.addWidget(cache_info)
+
+        clear_cache_btn = QPushButton("清空缓存")
+        clear_cache_btn.setMaximumWidth(120)
+        clear_cache_btn.setStyleSheet("font-size: 15px;")
+        clear_cache_btn.clicked.connect(self._clear_cache)
+        advanced_layout.addWidget(clear_cache_btn)
+
+        layout.addWidget(advanced_group)
+        layout.addStretch()
+
+        return widget
+
+    def _create_rules_tab(self) -> QWidget:
+        """创建规范管理标签页"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(25)
+
+        # 左侧：规范列表
+        left_panel = QFrame()
+        left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setSpacing(15)
+
+        list_title = QLabel("已导入的规范")
+        list_title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
+        left_layout.addWidget(list_title)
+
+        # 规范选择下拉
         select_layout = QHBoxLayout()
-        select_layout.addWidget(QLabel("当前规范:"))
+        select_label = QLabel("当前规范:")
+        select_label.setStyleSheet("font-size: 15px;")
+        select_layout.addWidget(select_label)
         self.rules_combo = QComboBox()
-        self.rules_combo.setMinimumWidth(200)
+        self.rules_combo.setMinimumWidth(300)
+        self.rules_combo.setStyleSheet("font-size: 15px; padding: 8px;")
         select_layout.addWidget(self.rules_combo)
+        left_layout.addLayout(select_layout)
 
-        refresh_btn = QPushButton("刷新")
+        # 刷新和设为当前按钮
+        btn_row = QHBoxLayout()
+        refresh_btn = QPushButton("刷新列表")
+        refresh_btn.setStyleSheet("font-size: 15px; padding: 8px 16px;")
         refresh_btn.clicked.connect(self._load_rules_list)
-        select_layout.addWidget(refresh_btn)
+        btn_row.addWidget(refresh_btn)
 
-        rules_layout.addLayout(select_layout)
+        set_current_btn = QPushButton("设为当前")
+        set_current_btn.setStyleSheet("font-size: 15px; padding: 8px 16px;")
+        set_current_btn.clicked.connect(self._set_current_brand)
+        btn_row.addWidget(set_current_btn)
 
-        # 上传规范文档
-        upload_layout = QHBoxLayout()
+        delete_btn = QPushButton("删除")
+        delete_btn.setStyleSheet("background-color: #e74c3c; color: white; font-size: 15px; padding: 8px 16px;")
+        delete_btn.clicked.connect(self._delete_rules)
+        btn_row.addWidget(delete_btn)
+
+        btn_row.addStretch()
+        left_layout.addLayout(btn_row)
+
+        # 上传按钮
+        upload_row = QHBoxLayout()
         self.upload_btn = QPushButton("上传规范文档 (PDF/PPT)")
+        self.upload_btn.setMinimumHeight(50)
         self.upload_btn.clicked.connect(self._upload_document)
-        upload_layout.addWidget(self.upload_btn)
+        self.upload_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-size: 15px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #219a52;
+            }
+        """)
+        upload_row.addWidget(self.upload_btn)
 
         self.new_btn = QPushButton("新建空白规范")
+        self.new_btn.setMinimumHeight(50)
+        self.new_btn.setStyleSheet("font-size: 15px;")
         self.new_btn.clicked.connect(self._new_rules)
-        upload_layout.addWidget(self.new_btn)
+        upload_row.addWidget(self.new_btn)
+        left_layout.addLayout(upload_row)
 
-        rules_layout.addLayout(upload_layout)
+        layout.addWidget(left_panel, 1)
+
+        # 右侧：规范详情
+        right_panel = QFrame()
+        right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
+        right_layout = QVBoxLayout(right_panel)
+
+        detail_title = QLabel("规范详情")
+        detail_title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
+        right_layout.addWidget(detail_title)
 
         # 规范预览
         self.rules_preview = QTextEdit()
         self.rules_preview.setReadOnly(True)
-        self.rules_preview.setMaximumHeight(200)
-        self.rules_preview.setPlaceholderText("选择或上传品牌规范后预览...")
-        rules_layout.addWidget(self.rules_preview)
+        self.rules_preview.setPlaceholderText("选择品牌规范后显示详情...")
+        self.rules_preview.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 15px;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        """)
+        right_layout.addWidget(self.rules_preview)
 
-        # 删除按钮
-        self.delete_btn = QPushButton("删除当前规范")
-        self.delete_btn.clicked.connect(self._delete_rules)
-        self.delete_btn.setStyleSheet("background-color: #e74c3c; color: white;")
-        rules_layout.addWidget(self.delete_btn)
+        layout.addWidget(right_panel, 2)
 
-        layout.addWidget(rules_group)
-
-        # 缓存设置
-        cache_group = QGroupBox("缓存设置")
-        cache_layout = QVBoxLayout(cache_group)
-
-        cache_info = QLabel("审核结果缓存可加速重复图片的审核速度")
-        cache_layout.addWidget(cache_info)
-
-        clear_cache_btn = QPushButton("清空缓存")
-        clear_cache_btn.clicked.connect(self._clear_cache)
-        cache_layout.addWidget(clear_cache_btn)
-
-        layout.addWidget(cache_group)
-
-        layout.addStretch()
+        # 连接信号
+        self.rules_combo.currentIndexChanged.connect(self._on_rules_changed)
 
         # 加载规范列表
         self._load_rules_list()
+
+        return widget
 
     def _load_settings(self):
         """加载设置"""
@@ -190,10 +320,89 @@ class SettingsPage(QWidget):
         if brand_id:
             rules = rules_context.get_rules(brand_id)
             if rules:
-                self.rules_preview.setPlainText(rules.to_json())
+                # 格式化显示规范详情
+                self.rules_preview.setPlainText(self._format_rules_detail(rules))
             rules_context.set_current_brand(brand_id)
         else:
             self.rules_preview.clear()
+
+    def _format_rules_detail(self, rules) -> str:
+        """格式化规范详情显示"""
+        lines = [f"品牌名称: {rules.brand_name}", f"版本: {rules.version}", ""]
+
+        has_structured_rules = False
+
+        # 色彩规范
+        if rules.color and (rules.color.primary or rules.color.secondary or rules.color.forbidden):
+            has_structured_rules = True
+            lines.append("【色彩规范】")
+            if rules.color.primary:
+                lines.append(f"  主色: {rules.color.primary.value} ({rules.color.primary.name})")
+            if rules.color.secondary:
+                colors = ", ".join(f"{c.value} ({c.name})" for c in rules.color.secondary)
+                lines.append(f"  辅助色: {colors}")
+            if rules.color.forbidden:
+                colors = ", ".join(f"{c.value}" for c in rules.color.forbidden)
+                lines.append(f"  禁用色: {colors}")
+            lines.append("")
+
+        # Logo规范
+        if rules.logo and (rules.logo.position_description or rules.logo.size_range):
+            has_structured_rules = True
+            lines.append("【Logo规范】")
+            lines.append(f"  位置: {rules.logo.position_description}")
+            if rules.logo.size_range:
+                lines.append(f"  尺寸: {rules.logo.size_range.get('min', 5)}% - {rules.logo.size_range.get('max', 15)}%")
+            lines.append(f"  安全间距: {rules.logo.safe_margin_px}px")
+            lines.append("")
+
+        # 字体规范
+        if rules.font and (rules.font.allowed or rules.font.forbidden):
+            has_structured_rules = True
+            lines.append("【字体规范】")
+            if rules.font.allowed:
+                lines.append(f"  允许: {', '.join(rules.font.allowed)}")
+            if rules.font.forbidden:
+                lines.append(f"  禁用: {', '.join(rules.font.forbidden)}")
+            lines.append("")
+
+        # 文案规范
+        if rules.copywriting and rules.copywriting.forbidden_words:
+            has_structured_rules = True
+            lines.append("【文案规范】")
+            words = ", ".join(w.word for w in rules.copywriting.forbidden_words)
+            lines.append(f"  禁用词: {words}")
+            lines.append("")
+
+        # 布局规范
+        if rules.layout and rules.layout.margin_min:
+            has_structured_rules = True
+            lines.append("【布局规范】")
+            lines.append(f"  最小边距: {rules.layout.margin_min}px")
+            if rules.layout.description:
+                lines.append(f"  说明: {rules.layout.description}")
+
+        # 如果没有结构化规则，显示原始文本
+        if not has_structured_rules and rules.raw_text:
+            lines.append("【原始规范文本】")
+            lines.append("")
+            # 截取前3000字符显示
+            text = rules.raw_text[:3000]
+            if len(rules.raw_text) > 3000:
+                text += f"\n\n... (共 {len(rules.raw_text)} 字符，已截取前3000字)"
+            lines.append(text)
+
+        return "\n".join(lines)
+
+    def _set_current_brand(self):
+        """设为当前品牌"""
+        brand_id = self.rules_combo.currentData()
+        if brand_id:
+            rules_context.set_current_brand(brand_id)
+            brand_name = self.rules_combo.currentText().split(" (")[0]
+            QMessageBox.information(self, "成功", f"已切换到品牌: {brand_name}")
+        else:
+            QMessageBox.warning(self, "警告", "请选择一个品牌规范")
 
     def _upload_document(self):
         """上传规范文档"""
@@ -205,22 +414,36 @@ class SettingsPage(QWidget):
         if not file_path:
             return
 
-        try:
-            # 解析文档
-            rules = document_parser.parse_file(file_path)
+        # 禁用按钮，显示处理中
+        self.upload_btn.setEnabled(False)
+        self.upload_btn.setText("解析中...")
 
-            # 保存
-            brand_id = rules_context.add_rules(rules)
+        # 后台线程解析
+        self._parse_worker = Worker(document_parser.parse_file, file_path)
+        self._parse_worker.finished_signal.connect(self._on_parse_finished)
+        self._parse_worker.error_signal.connect(self._on_parse_error)
+        self._parse_worker.start()
 
-            QMessageBox.information(
-                self, "成功",
-                f"规范文档已解析并保存\n品牌: {rules.brand_name}\nID: {brand_id}"
-            )
+    def _on_parse_finished(self, rules):
+        """解析完成"""
+        self.upload_btn.setEnabled(True)
+        self.upload_btn.setText("上传规范文档 (PDF/PPT)")
 
-            self._load_rules_list()
+        # 保存
+        brand_id = rules_context.add_rules(rules)
 
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"解析失败: {str(e)}")
+        QMessageBox.information(
+            self, "成功",
+            f"规范文档已解析并保存\n品牌: {rules.brand_name}\nID: {brand_id}"
+        )
+
+        self._load_rules_list()
+
+    def _on_parse_error(self, error_msg):
+        """解析失败"""
+        self.upload_btn.setEnabled(True)
+        self.upload_btn.setText("上传规范文档 (PDF/PPT)")
+        QMessageBox.critical(self, "错误", f"解析失败: {error_msg}")
 
     def _new_rules(self):
         """新建空白规范"""
