@@ -1,11 +1,34 @@
 """品牌合规审核平台 - 程序入口"""
 
 import sys
+import logging
 from pathlib import Path
+
+
+def setup_logging():
+    """配置日志"""
+    log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_format,
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+        ]
+    )
+    # 降低第三方库的日志级别
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("langchain").setLevel(logging.WARNING)
 
 
 def main():
     """主函数"""
+    # 配置日志
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("品牌合规审核平台启动...")
+
     # 设置工作目录
     import os
     if getattr(sys, 'frozen', False):

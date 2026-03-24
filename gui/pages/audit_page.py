@@ -1,6 +1,7 @@
 """审核页面 - 单图/批量审核"""
 
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 import uuid
@@ -19,6 +20,8 @@ from gui.utils import Worker
 from src.services.audit_service import audit_service
 from src.services.rules_context import rules_context
 from src.utils.config import get_app_dir
+
+logger = logging.getLogger(__name__)
 
 
 class AuditPage(QWidget):
@@ -97,7 +100,15 @@ class AuditPage(QWidget):
         left_panel = QFrame()
         left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
         left_panel.setMinimumWidth(350)
-        left_layout = QVBoxLayout(left_panel)
+
+        # 创建滚动区域包裹左侧面板
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        left_content = QWidget()
+        left_layout = QVBoxLayout(left_content)
         left_layout.setContentsMargins(15, 15, 15, 15)
         left_layout.setSpacing(18)
 
@@ -155,6 +166,51 @@ class AuditPage(QWidget):
         refresh_row.addStretch()
         brand_layout.addLayout(refresh_row)
 
+        # 压缩预设选择
+        compression_row = QHBoxLayout()
+        compression_label = QLabel("图片压缩:")
+        compression_label.setStyleSheet("font-size: 15px;")
+        compression_row.addWidget(compression_label)
+        self.single_compression_combo = QComboBox()
+        self.single_compression_combo.addItems([
+            "均衡（推荐）",
+            "高质量",
+            "高压缩",
+            "不压缩"
+        ])
+        self.single_compression_combo.setToolTip(
+            "均衡：1920px/500KB/75%，适合大多数场景\n"
+            "高质量：2560px/1MB/90%，保留更多细节\n"
+            "高压缩：1280px/300KB/60%，最小传输量\n"
+            "不压缩：原图传输，消耗更多Token"
+        )
+        self.single_compression_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 15px;
+            }
+        """)
+        compression_row.addWidget(self.single_compression_combo)
+        brand_layout.addLayout(compression_row)
+
         left_layout.addWidget(brand_group)
 
         # 图片选择
@@ -209,7 +265,10 @@ class AuditPage(QWidget):
         left_layout.addWidget(self.status_label)
 
         left_layout.addStretch()
-        splitter.addWidget(left_panel)
+
+        # 将左侧内容添加到滚动区域
+        left_scroll.setWidget(left_content)
+        splitter.addWidget(left_scroll)
 
         # 右侧：结果展示
         right_panel = QFrame()
@@ -324,18 +383,27 @@ class AuditPage(QWidget):
     def _create_batch_audit_tab(self) -> QWidget:
         """创建批量审核标签页"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
+
+        # 创建滚动区域包裹整个内容
+        batch_scroll = QScrollArea()
+        batch_scroll.setWidgetResizable(True)
+        batch_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        batch_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(18)
 
-        # 提示信息 - 更新为准确的时间预估
+        # 提示信息
         hint_frame = QFrame()
         hint_frame.setStyleSheet("background-color: #FEF3C7; border-radius: 8px; padding: 15px;")
         hint_layout = QVBoxLayout(hint_frame)
         hint_label = QLabel(
-            "批量审核预估时间：\n"
-            "• 单张图片约需 45-90 秒\n"
-            "• 10张图片约需 2-4 分钟（并发处理）\n"
-            "• 图片会自动压缩以节省时间和Token消耗"
+            "批量审核方案说明：\n"
+            "• 并发请求：同时发送多个独立API请求，速度快但每张图都需传输规范Prompt\n"
+            "• 合并请求：单次API调用处理多张图片，节省Prompt Token，响应解析更复杂\n"
+            "• 图片压缩可显著减少Token消耗和传输时间"
         )
         hint_label.setStyleSheet("color: #92400E; font-size: 14px;")
         hint_layout.addWidget(hint_label)
@@ -351,6 +419,7 @@ class AuditPage(QWidget):
             }
         """)
         settings_layout = QGridLayout(settings_group)
+        settings_layout.setSpacing(12)
 
         # 品牌选择
         brand_label = QLabel("品牌规范:")
@@ -389,6 +458,100 @@ class AuditPage(QWidget):
         refresh_btn.setStyleSheet("font-size: 15px;")
         refresh_btn.clicked.connect(self._load_batch_brand_list)
         settings_layout.addWidget(refresh_btn, 0, 2)
+
+        # 审核方案选择
+        mode_label = QLabel("审核方案:")
+        mode_label.setStyleSheet("font-size: 15px;")
+        settings_layout.addWidget(mode_label, 1, 0)
+
+        self.audit_mode_combo = QComboBox()
+        self.audit_mode_combo.addItems([
+            "并发请求（推荐，速度快）",
+            "合并请求（省Token，复杂）"
+        ])
+        self.audit_mode_combo.setToolTip(
+            "并发请求：同时发送多个API请求，速度更快\n"
+            "合并请求：单次API处理多图，节省Prompt重复传输"
+        )
+        self.audit_mode_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 15px;
+            }
+        """)
+        settings_layout.addWidget(self.audit_mode_combo, 1, 1)
+
+        # 并发数设置（仅并发模式有效）
+        concurrent_label = QLabel("并发数:")
+        concurrent_label.setStyleSheet("font-size: 15px;")
+        settings_layout.addWidget(concurrent_label, 2, 0)
+
+        concurrent_layout = QHBoxLayout()
+        self.concurrent_spin = QSpinBox()
+        self.concurrent_spin.setRange(1, 10)
+        self.concurrent_spin.setValue(5)
+        self.concurrent_spin.setStyleSheet("font-size: 15px; padding: 5px;")
+        concurrent_layout.addWidget(self.concurrent_spin)
+
+        concurrent_hint = QLabel("(并发请求模式有效)")
+        concurrent_hint.setStyleSheet("color: #7f8c8d; font-size: 13px;")
+        concurrent_layout.addWidget(concurrent_hint)
+        concurrent_layout.addStretch()
+        settings_layout.addLayout(concurrent_layout, 2, 1)
+
+        # 压缩预设选择
+        compression_label = QLabel("图片压缩:")
+        compression_label.setStyleSheet("font-size: 15px;")
+        settings_layout.addWidget(compression_label, 3, 0)
+
+        self.compression_combo = QComboBox()
+        self.compression_combo.addItems([
+            "均衡（推荐，1920px/500KB/75%）",
+            "高质量（2560px/1MB/90%）",
+            "高压缩（1280px/300KB/60%）",
+            "不压缩（原图传输）"
+        ])
+        self.compression_combo.setToolTip(
+            "均衡：适合大多数场景，压缩效果和画质平衡\n"
+            "高质量：保留更多细节，适合高清图片审核\n"
+            "高压缩：最小传输量，适合网速较慢或大量图片\n"
+            "不压缩：保留原图，消耗更多Token"
+        )
+        self.compression_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 15px;
+                padding: 8px;
+                background-color: white;
+                color: #2c3e50;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3498db;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 15px;
+            }
+        """)
+        settings_layout.addWidget(self.compression_combo, 3, 1)
 
         layout.addWidget(settings_group)
 
@@ -484,6 +647,15 @@ class AuditPage(QWidget):
         layout.addWidget(self.batch_result_group)
 
         layout.addStretch()
+
+        # 将内容添加到滚动区域
+        batch_scroll.setWidget(scroll_content)
+
+        # 主布局
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(batch_scroll)
+
         return widget
 
     def _load_brand_list(self):
@@ -522,6 +694,11 @@ class AuditPage(QWidget):
             return
 
         brand_id = self.brand_combo.currentData()
+
+        # 获取用户选择的压缩预设
+        compression_preset = ["balanced", "high_quality", "high_compression", "no_compression"][self.single_compression_combo.currentIndex()]
+        audit_service.set_compression_preset(compression_preset)
+        logger.info(f"单图审核使用压缩预设: {compression_preset}")
 
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
@@ -888,61 +1065,88 @@ class AuditPage(QWidget):
 
         brand_id = self.batch_brand_combo.currentData()
 
+        # 获取用户选择的设置
+        audit_mode = self.audit_mode_combo.currentIndex()  # 0=并发, 1=合并
+        concurrent_count = self.concurrent_spin.value()
+        compression_preset = ["balanced", "high_quality", "high_compression", "no_compression"][self.compression_combo.currentIndex()]
+
+        # 设置压缩预设
+        audit_service.set_compression_preset(compression_preset)
+        logger.info(f"使用压缩预设: {compression_preset}")
+
+        # 保存设置供_run_batch_audit使用
+        self._audit_mode = audit_mode
+        self._concurrent_count = concurrent_count
+
         self.batch_progress_bar.setVisible(True)
         self.batch_progress_bar.setRange(0, len(image_paths))
         self.batch_progress_bar.setValue(0)
-        self.batch_status_label.setText("正在审核...")
+
+        mode_text = "并发请求" if audit_mode == 0 else "合并请求"
+        self.batch_status_label.setText(f"正在审核（{mode_text}模式）...")
         self.batch_audit_btn.setEnabled(False)
         self.batch_result_group.setVisible(False)
 
         # 后台任务
-        self._batch_worker = Worker(self._run_batch_audit, image_paths, brand_id)
+        self._batch_worker = Worker(self._run_batch_audit, image_paths, brand_id, audit_mode, concurrent_count)
         self._batch_worker.finished_signal.connect(self._on_batch_finished)
         self._batch_worker.error_signal.connect(self._on_batch_error)
         self._batch_worker.progress_signal.connect(self._on_batch_progress)
         self._batch_worker.start()
 
-    def _run_batch_audit(self, image_paths: list, brand_id: str, progress_callback=None):
-        """执行批量审核 - 使用并发处理"""
-        import concurrent.futures
+    def _run_batch_audit(self, image_paths: list, brand_id: str, audit_mode: int = 0, concurrent_count: int = 5, progress_callback=None):
+        """执行批量审核 - 根据用户选择调用不同方案"""
+        import time
 
-        results = [None] * len(image_paths)
-        total = len(image_paths)
+        mode_text = "并发请求" if audit_mode == 0 else "合并请求"
+        logger.info(f"开始批量审核（{mode_text}模式），共 {len(image_paths)} 张图片")
 
-        def audit_single(index, path):
-            """审核单张图片"""
-            try:
-                report = audit_service.audit_file(path, brand_id)
-                return index, {
-                    "file_name": Path(path).name,
+        def progress_cb(completed, total, message):
+            """进度回调包装"""
+            if progress_callback:
+                progress_callback(completed, message)
+
+        start_time = time.time()
+
+        if audit_mode == 0:
+            # 方案A: 并发请求
+            results = audit_service.batch_audit_concurrent(
+                image_paths=image_paths,
+                brand_id=brand_id,
+                max_concurrent=concurrent_count,
+                progress_callback=progress_cb,
+            )
+        else:
+            # 方案B: 合并请求
+            results = audit_service.batch_audit_merged(
+                image_paths=image_paths,
+                brand_id=brand_id,
+                max_images_per_request=None,  # 自动计算
+                progress_callback=progress_cb,
+            )
+
+        elapsed = time.time() - start_time
+        logger.info(f"批量审核完成，耗时: {elapsed:.1f}秒，平均每张: {elapsed/len(image_paths):.1f}秒")
+
+        # 转换结果格式
+        formatted_results = []
+        for i, result in enumerate(results):
+            if result.get("status") == "success":
+                report = result["report"]
+                formatted_results.append({
+                    "file_name": result["file_name"],
                     "status": report.status.value,
                     "score": report.score,
                     "report": json.loads(report.to_json())
-                }
-            except Exception as e:
-                return index, {
-                    "file_name": Path(path).name,
+                })
+            else:
+                formatted_results.append({
+                    "file_name": result["file_name"],
                     "status": "error",
-                    "error": str(e)
-                }
+                    "error": result.get("error", "未知错误")
+                })
 
-        # 并发审核，最大5个并发
-        completed = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
-                executor.submit(audit_single, i, path): i
-                for i, path in enumerate(image_paths)
-            }
-
-            for future in concurrent.futures.as_completed(futures):
-                index, result = future.result()
-                results[index] = result
-                completed += 1
-
-                if progress_callback:
-                    progress_callback(completed, f"已完成 {completed}/{total}")
-
-        return results
+        return formatted_results
 
     def _on_batch_progress(self, current: int, message: str):
         """批量审核进度"""
