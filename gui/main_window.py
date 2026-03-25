@@ -242,9 +242,6 @@ class MainWindow(QMainWindow):
             if key in self.pages:
                 self.stack.setCurrentWidget(self.pages[key])
 
-                if key == 'history':
-                    self.pages['history'].refresh()
-
     def show_status(self, message: str, timeout: int = 3000):
         """显示状态消息"""
         self.status_bar.showMessage(message, timeout)

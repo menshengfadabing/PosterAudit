@@ -261,23 +261,12 @@ class SettingsPage(QWidget):
         select_layout.addWidget(self.rules_combo)
         left_layout.addLayout(select_layout)
 
-        # 刷新和设为当前按钮
+        # 删除按钮
         btn_row = QHBoxLayout()
-        refresh_btn = QPushButton("刷新列表")
-        refresh_btn.setStyleSheet("font-size: 15px; padding: 8px 16px;")
-        refresh_btn.clicked.connect(self._load_rules_list)
-        btn_row.addWidget(refresh_btn)
-
-        set_current_btn = QPushButton("设为当前")
-        set_current_btn.setStyleSheet("font-size: 15px; padding: 8px 16px;")
-        set_current_btn.clicked.connect(self._set_current_brand)
-        btn_row.addWidget(set_current_btn)
-
-        delete_btn = QPushButton("删除")
+        delete_btn = QPushButton("删除当前规范")
         delete_btn.setStyleSheet("background-color: #e74c3c; color: white; font-size: 15px; padding: 8px 16px;")
         delete_btn.clicked.connect(self._delete_rules)
         btn_row.addWidget(delete_btn)
-
         btn_row.addStretch()
         left_layout.addLayout(btn_row)
 
@@ -298,12 +287,6 @@ class SettingsPage(QWidget):
             }
         """)
         upload_row.addWidget(self.upload_btn)
-
-        self.new_btn = QPushButton("新建空白规范")
-        self.new_btn.setMinimumHeight(50)
-        self.new_btn.setStyleSheet("font-size: 15px;")
-        self.new_btn.clicked.connect(self._new_rules)
-        upload_row.addWidget(self.new_btn)
         left_layout.addLayout(upload_row)
 
         left_layout.addStretch()
@@ -506,16 +489,6 @@ class SettingsPage(QWidget):
 
         return "\n".join(lines)
 
-    def _set_current_brand(self):
-        """设为当前品牌"""
-        brand_id = self.rules_combo.currentData()
-        if brand_id:
-            rules_context.set_current_brand(brand_id)
-            brand_name = self.rules_combo.currentText().split(" (")[0]
-            QMessageBox.information(self, "成功", f"已切换到品牌: {brand_name}")
-        else:
-            QMessageBox.warning(self, "警告", "请选择一个品牌规范")
-
     def _upload_document(self):
         """上传规范文档"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -606,21 +579,6 @@ class SettingsPage(QWidget):
         self.task_finished.emit(False, f"解析失败: {error_msg}")
 
         QMessageBox.critical(self, "错误", f"解析失败: {error_msg}")
-
-    def _new_rules(self):
-        """新建空白规范"""
-        from src.models.schemas import BrandRules
-
-        rules = BrandRules(
-            brand_id="",
-            brand_name="新品牌",
-            version="1.0",
-        )
-
-        brand_id = rules_context.add_rules(rules)
-
-        QMessageBox.information(self, "成功", f"已创建空白规范: {brand_id}")
-        self._load_rules_list()
 
     def _delete_rules(self):
         """删除规范"""

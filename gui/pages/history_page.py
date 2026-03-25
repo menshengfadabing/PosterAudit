@@ -23,6 +23,11 @@ class HistoryPage(QWidget):
         self.current_report = None
         self._init_ui()
 
+    def showEvent(self, event):
+        """页面显示时自动刷新"""
+        super().showEvent(event)
+        self.refresh()
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(25, 25, 25, 25)
@@ -47,7 +52,7 @@ class HistoryPage(QWidget):
         left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
         left_layout = QVBoxLayout(left_panel)
 
-        # 筛选和刷新
+        # 筛选和操作按钮
         filter_layout = QHBoxLayout()
         filter_label = QLabel("筛选:")
         filter_label.setStyleSheet("font-size: 15px;")
@@ -59,13 +64,15 @@ class HistoryPage(QWidget):
         filter_layout.addWidget(self.filter_combo)
         filter_layout.addStretch()
 
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setStyleSheet("font-size: 15px;")
-        refresh_btn.clicked.connect(self.refresh)
-        filter_layout.addWidget(refresh_btn)
+        # 删除选中按钮
+        self.delete_btn = QPushButton("删除选中")
+        self.delete_btn.setStyleSheet("background-color: #e74c3c; color: white; font-size: 15px;")
+        self.delete_btn.clicked.connect(self._on_delete_selected)
+        self.delete_btn.setEnabled(False)
+        filter_layout.addWidget(self.delete_btn)
 
         clear_btn = QPushButton("清空历史")
-        clear_btn.setStyleSheet("background-color: #e74c3c; color: white; font-size: 15px;")
+        clear_btn.setStyleSheet("background-color: #c0392b; color: white; font-size: 15px;")
         clear_btn.clicked.connect(self._on_clear_all)
         filter_layout.addWidget(clear_btn)
         left_layout.addLayout(filter_layout)
@@ -98,14 +105,9 @@ class HistoryPage(QWidget):
         self.export_md_btn.clicked.connect(lambda: self._on_export("md"))
         self.export_md_btn.setEnabled(False)
 
-        self.open_folder_btn = QPushButton("打开目录")
-        self.open_folder_btn.setStyleSheet("font-size: 15px;")
-        self.open_folder_btn.clicked.connect(self._on_open_folder)
-
         export_layout.addStretch()
         export_layout.addWidget(self.export_json_btn)
         export_layout.addWidget(self.export_md_btn)
-        export_layout.addWidget(self.open_folder_btn)
         left_layout.addLayout(export_layout)
 
         splitter.addWidget(left_panel)
@@ -160,6 +162,12 @@ class HistoryPage(QWidget):
         self.detail_text.setPlaceholderText("选择一条记录查看详情...")
         self.detail_text.setStyleSheet("border: 1px solid #ddd; border-radius: 5px; padding: 15px; font-size: 14px;")
         right_layout.addWidget(self.detail_text, 1)
+
+        # 提示信息
+        hint_label = QLabel("💡 提示：上方显示的是简化版结果，查看完整报告请点击导出JSON或Markdown")
+        hint_label.setStyleSheet("color: #7f8c8d; font-size: 12px; padding: 5px;")
+        hint_label.setWordWrap(True)
+        right_layout.addWidget(hint_label)
 
         splitter.addWidget(right_panel)
         splitter.setSizes([500, 500])
@@ -265,6 +273,7 @@ class HistoryPage(QWidget):
         if row < len(self.report_files):
             self.export_json_btn.setEnabled(True)
             self.export_md_btn.setEnabled(True)
+            self.delete_btn.setEnabled(True)  # 启用删除按钮
             file_info = self.report_files[row]
             self.current_report = file_info
             self._display_detail(file_info)
@@ -312,7 +321,7 @@ class HistoryPage(QWidget):
                 lines.append(f"【详细结果 ({len(results)}项)】")
                 lines.append("")
 
-                for i, r in enumerate(results[:10]):  # 最多显示10条完整报告
+                for i, r in enumerate(results):  # 显示全部结果
                     status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(r.get("status"), "❓")
                     lines.append(f"━━━ 图片 {i+1}: {r.get('file_name', '-')} ━━━")
                     lines.append(f"状态: {status_icon} | 分数: {r.get('score', 'N/A')}/100")
@@ -374,9 +383,6 @@ class HistoryPage(QWidget):
                             lines.append(f"⚠️ 问题: 🔴严重{len(critical)} 🟡主要{len(major)} 🟢次要{len(minor)}")
 
                     lines.append("")
-
-                if len(results) > 10:
-                    lines.append(f"... 还有 {len(results) - 10} 张图片未显示")
 
         elif "report" in data:
             # 单图审核
@@ -836,6 +842,55 @@ class HistoryPage(QWidget):
 
         return "\n".join(lines)
 
+    def _on_delete_selected(self):
+        """删除选中的记录"""
+        if not self.current_report:
+            QMessageBox.warning(self, "警告", "请先选择要删除的记录")
+            return
+
+        batch_id = self.current_report.get("batch_id", "")
+        if not batch_id:
+            QMessageBox.warning(self, "警告", "无法获取记录ID")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定要删除这条记录吗？\n时间: {self.current_report.get('time', '-')}\n品牌: {self.current_report.get('brand_name', '-')}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 删除JSON文件
+            report_file = self.reports_dir / f"{batch_id}.json"
+            if report_file.exists():
+                report_file.unlink()
+
+            # 更新索引文件
+            index_file = self.reports_dir / "history_index.json"
+            if index_file.exists():
+                try:
+                    with open(index_file, 'r', encoding='utf-8') as f:
+                        history_list = json.load(f)
+                    # 移除被删除的记录
+                    history_list = [item for item in history_list if item.get("batch_id") != batch_id]
+                    with open(index_file, 'w', encoding='utf-8') as f:
+                        json.dump(history_list, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+
+            # 清空当前选中状态
+            self.current_report = None
+            self._current_full_report = None
+            self.history_table.clearSelection()
+            self.detail_text.clear()
+            self.delete_btn.setEnabled(False)
+            self.export_json_btn.setEnabled(False)
+            self.export_md_btn.setEnabled(False)
+
+            # 刷新列表并更新统计
+            self.refresh()
+            QMessageBox.information(self, "成功", "记录已删除")
+
     def _on_clear_all(self):
         """清空所有历史"""
         reply = QMessageBox.question(
@@ -849,19 +904,16 @@ class HistoryPage(QWidget):
             for f in self.reports_dir.glob("*.json"):
                 f.unlink()
 
+            # 清空索引文件
+            index_file = self.reports_dir / "history_index.json"
+            if index_file.exists():
+                try:
+                    with open(index_file, 'w', encoding='utf-8') as f:
+                        json.dump([], f)
+                except Exception:
+                    pass
+
             self.refresh()
             self.detail_text.clear()
             self._current_full_report = None
             QMessageBox.information(self, "成功", "历史记录已清空")
-
-    def _on_open_folder(self):
-        """打开报告目录"""
-        import subprocess
-        import sys
-
-        if sys.platform == 'win32':
-            subprocess.run(['explorer', str(self.reports_dir)])
-        elif sys.platform == 'darwin':
-            subprocess.run(['open', str(self.reports_dir)])
-        else:
-            subprocess.run(['xdg-open', str(self.reports_dir)])

@@ -28,17 +28,22 @@ class AuditPage(QWidget):
     """审核页面"""
 
     # 进度信号: (percent, message, log_message)
-    # percent: -1 表示不确定进度, 0-100 表示百分比
-    # message: 状态栏显示的消息
-    # log_message: 日志消息（可选）
     progress_updated = Signal(int, str, str)
     task_started = Signal(str)  # 任务名称
     task_finished = Signal(bool, str)  # 成功/失败, 消息
+    # 流式结果信号: (result, index, completed, total)
+    streaming_result = Signal(dict, int, int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.audit_result = None
         self._init_ui()
+
+    def showEvent(self, event):
+        """页面显示时自动刷新品牌列表"""
+        super().showEvent(event)
+        self._load_brand_list()
+        self._load_batch_brand_list()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -164,15 +169,6 @@ class AuditPage(QWidget):
         self._load_brand_list()
         brand_row.addWidget(self.brand_combo)
         brand_layout.addLayout(brand_row)
-
-        # 刷新按钮
-        refresh_row = QHBoxLayout()
-        refresh_btn = QPushButton("刷新品牌列表")
-        refresh_btn.setStyleSheet("font-size: 15px;")
-        refresh_btn.clicked.connect(self._load_brand_list)
-        refresh_row.addWidget(refresh_btn)
-        refresh_row.addStretch()
-        brand_layout.addLayout(refresh_row)
 
         # 压缩预设选择
         compression_row = QHBoxLayout()
@@ -362,6 +358,12 @@ class AuditPage(QWidget):
         scroll.setWidget(self.result_widget)
         right_layout.addWidget(scroll, 1)
 
+        # 提示信息
+        hint_label = QLabel("💡 提示：上方显示的是简化版结果，查看完整报告请点击导出JSON或Markdown")
+        hint_label.setStyleSheet("color: #7f8c8d; font-size: 12px; padding: 5px;")
+        hint_label.setWordWrap(True)
+        right_layout.addWidget(hint_label)
+
         # 导出按钮
         export_layout = QHBoxLayout()
         self.export_json_btn = QPushButton("导出JSON")
@@ -461,11 +463,6 @@ class AuditPage(QWidget):
         """)
         self._load_batch_brand_list()
         settings_layout.addWidget(self.batch_brand_combo, 0, 1)
-
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setStyleSheet("font-size: 15px;")
-        refresh_btn.clicked.connect(self._load_batch_brand_list)
-        settings_layout.addWidget(refresh_btn, 0, 2)
 
         # 审核方案选择
         mode_label = QLabel("审核方案:")
@@ -643,13 +640,23 @@ class AuditPage(QWidget):
         self.batch_result_list.setStyleSheet("font-size: 14px;")
         batch_result_layout.addWidget(self.batch_result_list)
 
+        # 提示信息
+        batch_hint_label = QLabel("💡 提示：上方显示的是简化版结果，查看完整报告请点击导出JSON或Markdown")
+        batch_hint_label.setStyleSheet("color: #7f8c8d; font-size: 12px; padding: 5px;")
+        batch_hint_label.setWordWrap(True)
+        batch_result_layout.addWidget(batch_hint_label)
+
         # 批量导出按钮
         batch_export_layout = QHBoxLayout()
         self.batch_export_json_btn = QPushButton("导出JSON")
         self.batch_export_json_btn.setStyleSheet("font-size: 15px;")
         self.batch_export_json_btn.clicked.connect(lambda: self._on_batch_export("json"))
+        self.batch_export_md_btn = QPushButton("导出Markdown")
+        self.batch_export_md_btn.setStyleSheet("font-size: 15px;")
+        self.batch_export_md_btn.clicked.connect(lambda: self._on_batch_export("md"))
         batch_export_layout.addStretch()
         batch_export_layout.addWidget(self.batch_export_json_btn)
+        batch_export_layout.addWidget(self.batch_export_md_btn)
         batch_result_layout.addLayout(batch_export_layout)
 
         layout.addWidget(self.batch_result_group)
@@ -1113,7 +1120,11 @@ class AuditPage(QWidget):
 
         self.batch_status_label.setText(f"正在审核（{mode_text}模式）...")
         self.batch_audit_btn.setEnabled(False)
-        self.batch_result_group.setVisible(False)
+        self.batch_result_group.setVisible(True)  # 提前显示结果区域
+        self.batch_result_list.clear()  # 清空之前的结果
+
+        # 连接流式结果信号
+        self.streaming_result.connect(self._on_streaming_result)
 
         # 后台任务
         self._batch_worker = Worker(self._run_batch_audit, image_paths, brand_id, audit_mode, concurrent_count)
@@ -1121,6 +1132,21 @@ class AuditPage(QWidget):
         self._batch_worker.error_signal.connect(self._on_batch_error)
         self._batch_worker.progress_signal.connect(self._on_batch_progress)
         self._batch_worker.start()
+
+    def _on_streaming_result(self, result: dict, index: int, completed: int, total: int):
+        """处理流式结果 - 实时更新UI"""
+        status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(result.get("status"), "❓")
+        line = f"{status_icon} {result.get('file_name')} - 分数: {result.get('score', 'N/A')}"
+
+        # 追加到结果列表
+        current_text = self.batch_result_list.toPlainText()
+        if current_text:
+            self.batch_result_list.setPlainText(current_text + "\n" + line)
+        else:
+            self.batch_result_list.setPlainText(line)
+
+        # 更新进度
+        self.batch_progress_bar.setValue(completed)
 
     def _run_batch_audit(self, image_paths: list, brand_id: str, audit_mode: int = 0, concurrent_count: int = 5, progress_callback=None):
         """执行批量审核 - 根据用户选择调用不同方案"""
@@ -1130,71 +1156,81 @@ class AuditPage(QWidget):
         logger.info(f"开始批量审核（{mode_text}模式），共 {len(image_paths)} 张图片")
 
         total = len(image_paths)
+        self._streaming_results = []  # 存储流式结果
 
         def progress_cb(completed, total, message):
             """进度回调包装"""
             if progress_callback:
                 progress_callback(completed, message)
-            # 发送进度信号到主窗口
             percent = int(completed / total * 100) if total > 0 else 0
             self.progress_updated.emit(percent, message, message)
+
+        def result_cb(result, index, completed, total):
+            """流式结果回调 - 每处理完一张图片就返回"""
+            # 转换格式
+            if result.get("status") == "success":
+                report = result["report"]
+                formatted = {
+                    "file_name": result["file_name"],
+                    "status": report.status.value,
+                    "score": report.score,
+                    "report": json.loads(report.to_json())
+                }
+            else:
+                formatted = {
+                    "file_name": result["file_name"],
+                    "status": "error",
+                    "error": result.get("error", "未知错误")
+                }
+
+            self._streaming_results.append(formatted)
+            # 发送流式结果信号
+            self.streaming_result.emit(formatted, index, completed, total)
 
         start_time = time.time()
 
         if audit_mode == 0:
             # 方案A: 并发请求
-            results = audit_service.batch_audit_concurrent(
+            audit_service.batch_audit_concurrent(
                 image_paths=image_paths,
                 brand_id=brand_id,
                 max_concurrent=concurrent_count,
                 progress_callback=progress_cb,
+                result_callback=result_cb,
             )
         else:
             # 方案B: 合并请求
-            results = audit_service.batch_audit_merged(
+            audit_service.batch_audit_merged(
                 image_paths=image_paths,
                 brand_id=brand_id,
                 max_images_per_request=None,  # 自动计算
                 progress_callback=progress_cb,
+                result_callback=result_cb,
             )
 
         elapsed = time.time() - start_time
         logger.info(f"批量审核完成，耗时: {elapsed:.1f}秒，平均每张: {elapsed/len(image_paths):.1f}秒")
 
-        # 转换结果格式
-        formatted_results = []
-        for i, result in enumerate(results):
-            if result.get("status") == "success":
-                report = result["report"]
-                formatted_results.append({
-                    "file_name": result["file_name"],
-                    "status": report.status.value,
-                    "score": report.score,
-                    "report": json.loads(report.to_json())
-                })
-            else:
-                formatted_results.append({
-                    "file_name": result["file_name"],
-                    "status": "error",
-                    "error": result.get("error", "未知错误")
-                })
-
-        return formatted_results
+        return self._streaming_results
 
     def _on_batch_progress(self, current: int, message: str):
         """批量审核进度"""
         self.batch_progress_bar.setValue(current)
         self.batch_status_label.setText(message)
-        # 计算百分比并发送信号
         if hasattr(self, '_total_images') and self._total_images > 0:
             percent = int(current / self._total_images * 100)
             self.progress_updated.emit(percent, message, message)
 
     def _on_batch_finished(self, results: list):
         """批量审核完成"""
+        # 断开流式结果信号
+        try:
+            self.streaming_result.disconnect(self._on_streaming_result)
+        except:
+            pass
+
         self.batch_progress_bar.setVisible(False)
         self.batch_audit_btn.setEnabled(True)
-        self.batch_result_group.setVisible(True)
 
         # 计算摘要
         total = len(results)
@@ -1210,13 +1246,6 @@ class AuditPage(QWidget):
             f"总数: {total} | 通过: {pass_count} | 警告: {warning_count} | 失败: {fail_count} | 错误: {error_count} | 平均分: {avg_score:.1f}"
         )
 
-        # 结果列表
-        result_lines = []
-        for r in results:
-            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(r.get("status"), "❓")
-            result_lines.append(f"{status_icon} {r.get('file_name')} - 分数: {r.get('score', 'N/A')}")
-
-        self.batch_result_list.setText("\n".join(result_lines))
         self.batch_status_label.setText("批量审核完成!")
 
         # 发送任务完成信号
@@ -1317,3 +1346,81 @@ class AuditPage(QWidget):
                         "results": self._last_batch_results
                     }, f, ensure_ascii=False, indent=2)
                 QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+        elif format_type == "md":
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "导出批量Markdown报告",
+                str(export_dir / f"batch_report_{timestamp}.md"),
+                "Markdown文件 (*.md)"
+            )
+            if file_path:
+                md_content = self._generate_batch_markdown()
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(md_content)
+                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+
+    def _generate_batch_markdown(self) -> str:
+        """生成批量报告Markdown内容"""
+        lines = [
+            "# 批量审核报告",
+            f"\n**生成时间:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+            "---\n"
+        ]
+
+        for i, result in enumerate(self._last_batch_results, 1):
+            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(result.get("status"), "❓")
+            lines.append(f"## {i}. {result.get('file_name', '未知文件')}")
+            lines.append(f"\n**状态:** {status_icon} {result.get('status', '-')}")
+            lines.append(f"**评分:** {result.get('score', 'N/A')}/100\n")
+
+            report = result.get("report", {})
+            if report:
+                if report.get("summary"):
+                    lines.append("### 总体评价\n")
+                    lines.append(report["summary"])
+                    lines.append("")
+
+                # 检测结果
+                detection = report.get("detection", {})
+                if detection:
+                    lines.append("### 检测结果\n")
+                    logo = detection.get("logo", {})
+                    if logo:
+                        lines.append(f"- **Logo:** {'已检测' if logo.get('found') else '未检测到'}")
+                        if logo.get("found"):
+                            lines.append(f"  - 位置: {logo.get('position', '-')}")
+                            lines.append(f"  - 尺寸: {logo.get('size_percent', 0):.1f}%")
+                    lines.append("")
+
+                # 问题列表
+                issues = report.get("issues", {})
+                critical = issues.get("critical", [])
+                major = issues.get("major", [])
+                minor = issues.get("minor", [])
+
+                if critical or major or minor:
+                    lines.append("### 问题列表\n")
+                    if critical:
+                        lines.append("#### 🔴 严重问题")
+                        for issue in critical:
+                            lines.append(f"- {issue.get('description', '')}")
+                            if issue.get("suggestion"):
+                                lines.append(f"  - 建议: {issue['suggestion']}")
+                        lines.append("")
+                    if major:
+                        lines.append("#### 🟠 主要问题")
+                        for issue in major:
+                            lines.append(f"- {issue.get('description', '')}")
+                            if issue.get("suggestion"):
+                                lines.append(f"  - 建议: {issue['suggestion']}")
+                        lines.append("")
+                    if minor:
+                        lines.append("#### 🟢 次要问题")
+                        for issue in minor:
+                            lines.append(f"- {issue.get('description', '')}")
+                            if issue.get("suggestion"):
+                                lines.append(f"  - 建议: {issue['suggestion']}")
+                        lines.append("")
+
+            lines.append("---\n")
+
+        return "\n".join(lines)
