@@ -1,15 +1,18 @@
-"""图片拖拽区域组件"""
+"""图片拖拽区域组件（Fluent风格）"""
 
 from pathlib import Path
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QFrame
-)
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QFrame
 from PySide6.QtGui import QPixmap
 
+from qfluentwidgets import (
+    PushButton, PrimaryPushButton, StrongBodyLabel,
+    CaptionLabel, CardWidget, FluentIcon as FIF
+)
 
-class ImageDropArea(QWidget):
-    """图片拖拽上传区域"""
+
+class ImageDropArea(CardWidget):
+    """图片拖拽上传区域 - Fluent风格"""
 
     image_selected = Signal(str)
     images_selected = Signal(list)
@@ -24,9 +27,11 @@ class ImageDropArea(QWidget):
     def _init_ui(self):
         self.setAcceptDrops(True)
         self.setMinimumSize(350, 220)
+        self.setBorderRadius(8)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
         # 拖拽提示区域
         self.drop_frame = QFrame()
@@ -34,46 +39,43 @@ class ImageDropArea(QWidget):
         self.drop_frame.setStyleSheet("""
             QFrame {
                 border: 2px dashed #aaa;
-                border-radius: 10px;
-                background-color: #f9f9f9;
+                border-radius: 8px;
+                background-color: rgba(0, 0, 0, 0.02);
             }
             QFrame:hover {
-                border-color: #4a9eff;
-                background-color: #f0f7ff;
+                border-color: #0078d4;
+                background-color: rgba(0, 120, 212, 0.05);
             }
         """)
 
         drop_layout = QVBoxLayout(self.drop_frame)
+        drop_layout.setSpacing(8)
 
-        self.hint_label = QLabel("拖拽图片到此处\n或点击选择图片")
+        self.hint_label = StrongBodyLabel("拖拽图片到此处\n或点击选择图片")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint_label.setStyleSheet("color: #666; font-size: 16px;")
         drop_layout.addWidget(self.hint_label)
 
-        self.format_label = QLabel("支持格式: PNG, JPG, JPEG, BMP, WEBP")
+        self.format_label = CaptionLabel("支持格式: PNG, JPG, JPEG, BMP, WEBP")
         self.format_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.format_label.setStyleSheet("color: #999; font-size: 13px;")
         drop_layout.addWidget(self.format_label)
 
         layout.addWidget(self.drop_frame)
 
         # 按钮区域
-        btn_layout = QVBoxLayout()
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
 
-        self.select_btn = QPushButton("选择图片")
-        self.select_btn.setStyleSheet("font-size: 15px; padding: 10px;")
+        self.select_btn = PrimaryPushButton("选择图片")
         self.select_btn.clicked.connect(self._on_select_clicked)
+        btn_layout.addWidget(self.select_btn)
 
-        self.clear_btn = QPushButton("清空")
-        self.clear_btn.setStyleSheet("font-size: 15px; padding: 10px;")
+        self.clear_btn = PushButton("清空")
         self.clear_btn.clicked.connect(self.clear_images)
         self.clear_btn.setVisible(False)
+        btn_layout.addWidget(self.clear_btn)
 
-        btn_row = QVBoxLayout()
-        btn_row.addWidget(self.select_btn)
-        btn_row.addWidget(self.clear_btn)
-
-        layout.addLayout(btn_row)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():

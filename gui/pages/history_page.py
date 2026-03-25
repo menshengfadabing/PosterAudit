@@ -1,25 +1,32 @@
-"""报告历史页面"""
+"""报告历史页面（Fluent风格）"""
 
 import json
 from pathlib import Path
 from datetime import datetime
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QSplitter, QFrame, QTextEdit, QComboBox, QFileDialog,
-    QScrollArea, QGridLayout
-)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFileDialog
 from PySide6.QtGui import QColor
+
+from qfluentwidgets import (
+    ScrollArea, StrongBodyLabel, CaptionLabel, BodyLabel,
+    PushButton, PrimaryPushButton, ComboBox, TextEdit,
+    TableWidget, InfoBar, InfoBarPosition,
+    MessageBox, CardWidget, TitleLabel, SubtitleLabel
+)
+from PySide6.QtWidgets import QTableWidgetItem
 
 from src.utils.config import get_app_dir
 
 
-class HistoryPage(QWidget):
-    """报告历史页面"""
+class HistoryPage(ScrollArea):
+    """报告历史页面 - Fluent风格"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("historyPage")
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         self.current_report = None
         self._init_ui()
 
@@ -29,79 +36,74 @@ class HistoryPage(QWidget):
         self.refresh()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
+        # 主容器
+        self.view = QWidget()
+        self.setWidget(self.view)
+
+        layout = QVBoxLayout(self.view)
+        layout.setContentsMargins(36, 20, 36, 20)
         layout.setSpacing(20)
 
         # 标题
-        title = QLabel("审核历史")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title = TitleLabel("审核历史")
         layout.addWidget(title)
 
         # 说明
-        desc = QLabel("查看和管理历史审核报告（历史记录持久化保存在 data/audit_history/ 目录）")
-        desc.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        desc = CaptionLabel("查看和管理历史审核报告（历史记录持久化保存在 data/audit_history/ 目录）")
         layout.addWidget(desc)
 
-        # 主分割器
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        layout.addWidget(splitter, 1)
+        # 主内容区
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(16)
 
         # 左侧：报告列表
-        left_panel = QFrame()
-        left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        left_layout = QVBoxLayout(left_panel)
+        left_card = CardWidget()
+        left_card.setMinimumWidth(480)
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setContentsMargins(20, 20, 20, 20)
+        left_layout.setSpacing(12)
 
         # 筛选和操作按钮
         filter_layout = QHBoxLayout()
-        filter_label = QLabel("筛选:")
-        filter_label.setStyleSheet("font-size: 15px;")
+        filter_label = BodyLabel("筛选:")
         filter_layout.addWidget(filter_label)
-        self.filter_combo = QComboBox()
-        self.filter_combo.setStyleSheet("font-size: 15px; padding: 8px;")
+        self.filter_combo = ComboBox()
         self.filter_combo.addItems(["全部", "通过", "需修改", "不通过"])
         self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(self.filter_combo)
         filter_layout.addStretch()
 
         # 删除选中按钮
-        self.delete_btn = QPushButton("删除选中")
-        self.delete_btn.setStyleSheet("background-color: #e74c3c; color: white; font-size: 15px;")
+        self.delete_btn = PushButton("删除选中")
         self.delete_btn.clicked.connect(self._on_delete_selected)
         self.delete_btn.setEnabled(False)
         filter_layout.addWidget(self.delete_btn)
 
-        clear_btn = QPushButton("清空历史")
-        clear_btn.setStyleSheet("background-color: #c0392b; color: white; font-size: 15px;")
+        clear_btn = PushButton("清空历史")
         clear_btn.clicked.connect(self._on_clear_all)
         filter_layout.addWidget(clear_btn)
         left_layout.addLayout(filter_layout)
 
         # 报告表格
-        self.history_table = QTableWidget()
+        self.history_table = TableWidget()
         self.history_table.setColumnCount(5)
         self.history_table.setHorizontalHeaderLabels(["时间", "品牌", "文件数", "评分", "状态"])
-        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.history_table.setAlternatingRowColors(True)
-        self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.history_table.setStyleSheet("font-size: 14px;")
+        self.history_table.horizontalHeader().setStretchLastSection(True)
+        self.history_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.history_table.cellClicked.connect(self._on_row_clicked)
         left_layout.addWidget(self.history_table)
 
         # 统计
-        self.stats_label = QLabel("共 0 条记录")
-        self.stats_label.setStyleSheet("color: #7f8c8d; padding: 8px; font-size: 14px;")
+        self.stats_label = CaptionLabel("共 0 条记录")
         left_layout.addWidget(self.stats_label)
 
         # 导出按钮
         export_layout = QHBoxLayout()
-        self.export_json_btn = QPushButton("导出JSON")
-        self.export_json_btn.setStyleSheet("font-size: 15px;")
+        self.export_json_btn = PushButton("导出JSON")
         self.export_json_btn.clicked.connect(lambda: self._on_export("json"))
         self.export_json_btn.setEnabled(False)
 
-        self.export_md_btn = QPushButton("导出Markdown")
-        self.export_md_btn.setStyleSheet("font-size: 15px;")
+        self.export_md_btn = PushButton("导出Markdown")
         self.export_md_btn.clicked.connect(lambda: self._on_export("md"))
         self.export_md_btn.setEnabled(False)
 
@@ -110,67 +112,60 @@ class HistoryPage(QWidget):
         export_layout.addWidget(self.export_md_btn)
         left_layout.addLayout(export_layout)
 
-        splitter.addWidget(left_panel)
+        content_layout.addWidget(left_card, 1)
 
         # 右侧：报告详情
-        right_panel = QFrame()
-        right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        right_layout = QVBoxLayout(right_panel)
+        right_card = CardWidget()
+        right_card.setMinimumWidth(400)
+        right_layout = QVBoxLayout(right_card)
+        right_layout.setContentsMargins(20, 20, 20, 20)
+        right_layout.setSpacing(12)
 
-        detail_title = QLabel("报告详情")
-        detail_title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        detail_title = StrongBodyLabel("报告详情")
         right_layout.addWidget(detail_title)
 
         # 摘要区域
-        self.summary_frame = QFrame()
-        self.summary_frame.setStyleSheet("background-color: #f8f9fa; border-radius: 8px; padding: 15px;")
-        self.summary_layout = QGridLayout(self.summary_frame)
+        summary_card = CardWidget()
+        summary_card.setBorderRadius(8)
+        summary_layout = QGridLayout(summary_card)
+        summary_layout.setContentsMargins(16, 16, 16, 16)
+        summary_layout.setSpacing(12)
 
-        self.time_label = QLabel("--")
-        self.brand_label = QLabel("--")
-        self.score_label = QLabel("--")
-        self.status_label = QLabel("--")
+        time_lbl = BodyLabel("时间:")
+        brand_lbl = BodyLabel("品牌:")
+        score_lbl = BodyLabel("评分:")
+        status_lbl = BodyLabel("状态:")
 
-        time_lbl = QLabel("时间:")
-        time_lbl.setStyleSheet("font-size: 15px;")
-        brand_lbl = QLabel("品牌:")
-        brand_lbl.setStyleSheet("font-size: 15px;")
-        score_lbl = QLabel("评分:")
-        score_lbl.setStyleSheet("font-size: 15px;")
-        status_lbl = QLabel("状态:")
-        status_lbl.setStyleSheet("font-size: 15px;")
+        self.time_label = BodyLabel("--")
+        self.brand_label = BodyLabel("--")
+        self.score_label = BodyLabel("--")
+        self.status_label = BodyLabel("--")
 
-        self.time_label.setStyleSheet("font-size: 15px;")
-        self.brand_label.setStyleSheet("font-size: 15px;")
-        self.score_label.setStyleSheet("font-size: 15px;")
-        self.status_label.setStyleSheet("font-size: 15px;")
+        summary_layout.addWidget(time_lbl, 0, 0)
+        summary_layout.addWidget(self.time_label, 0, 1)
+        summary_layout.addWidget(brand_lbl, 0, 2)
+        summary_layout.addWidget(self.brand_label, 0, 3)
+        summary_layout.addWidget(score_lbl, 1, 0)
+        summary_layout.addWidget(self.score_label, 1, 1)
+        summary_layout.addWidget(status_lbl, 1, 2)
+        summary_layout.addWidget(self.status_label, 1, 3)
 
-        self.summary_layout.addWidget(time_lbl, 0, 0)
-        self.summary_layout.addWidget(self.time_label, 0, 1)
-        self.summary_layout.addWidget(brand_lbl, 0, 2)
-        self.summary_layout.addWidget(self.brand_label, 0, 3)
-        self.summary_layout.addWidget(score_lbl, 1, 0)
-        self.summary_layout.addWidget(self.score_label, 1, 1)
-        self.summary_layout.addWidget(status_lbl, 1, 2)
-        self.summary_layout.addWidget(self.status_label, 1, 3)
-
-        right_layout.addWidget(self.summary_frame)
+        right_layout.addWidget(summary_card)
 
         # 详细内容
-        self.detail_text = QTextEdit()
+        self.detail_text = TextEdit()
         self.detail_text.setReadOnly(True)
         self.detail_text.setPlaceholderText("选择一条记录查看详情...")
-        self.detail_text.setStyleSheet("border: 1px solid #ddd; border-radius: 5px; padding: 15px; font-size: 14px;")
         right_layout.addWidget(self.detail_text, 1)
 
         # 提示信息
-        hint_label = QLabel("💡 提示：上方显示的是简化版结果，查看完整报告请点击导出JSON或Markdown")
-        hint_label.setStyleSheet("color: #7f8c8d; font-size: 12px; padding: 5px;")
+        hint_label = CaptionLabel("上方显示简化结果，完整报告请点击导出JSON或Markdown")
         hint_label.setWordWrap(True)
         right_layout.addWidget(hint_label)
 
-        splitter.addWidget(right_panel)
-        splitter.setSizes([500, 500])
+        content_layout.addWidget(right_card, 1)
+
+        layout.addLayout(content_layout, 1)
 
         # 报告目录
         self.reports_dir = get_app_dir() / "data" / "audit_history"
@@ -322,8 +317,8 @@ class HistoryPage(QWidget):
                 lines.append("")
 
                 for i, r in enumerate(results):  # 显示全部结果
-                    status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(r.get("status"), "❓")
-                    lines.append(f"━━━ 图片 {i+1}: {r.get('file_name', '-')} ━━━")
+                    status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(r.get("status"), "?")
+                    lines.append(f"--- 图片 {i+1}: {r.get('file_name', '-')} ---")
                     lines.append(f"状态: {status_icon} | 分数: {r.get('score', 'N/A')}/100")
                     lines.append("")
 
@@ -331,7 +326,7 @@ class HistoryPage(QWidget):
                     if report:
                         # 摘要
                         if report.get("summary"):
-                            lines.append("📝 总体评价:")
+                            lines.append("总体评价:")
                             lines.append(f"  {report['summary'][:200]}{'...' if len(report.get('summary', '')) > 200 else ''}")
                             lines.append("")
 
@@ -342,17 +337,17 @@ class HistoryPage(QWidget):
                             logo = detection.get("logo", {})
                             if logo:
                                 if logo.get("found"):
-                                    pos_ok = "✅" if logo.get("position_correct") else "❌"
-                                    lines.append(f"🔍 Logo: 已检测 | 位置: {logo.get('position', '-')} ({pos_ok}) | 尺寸: {logo.get('size_percent', 0):.1f}%")
+                                    pos_ok = "" if logo.get("position_correct") else ""
+                                    lines.append(f"Logo: 已检测 | 位置: {logo.get('position', '-')} ({pos_ok}) | 尺寸: {logo.get('size_percent', 0):.1f}%")
                                 else:
-                                    lines.append("🔍 Logo: 未检测到")
+                                    lines.append("Logo: 未检测到")
                                 lines.append("")
 
                             # 颜色
                             colors = detection.get("colors", [])
                             if colors:
                                 color_strs = [f"{c.get('hex', '')}({c.get('percent', 0):.0f}%)" for c in colors[:5]]
-                                lines.append(f"🎨 颜色: {', '.join(color_strs)}")
+                                lines.append(f"颜色: {', '.join(color_strs)}")
                                 lines.append("")
 
                             # 字体
@@ -360,9 +355,9 @@ class HistoryPage(QWidget):
                             if fonts:
                                 forbidden = [f for f in fonts if f.get("is_forbidden")]
                                 if forbidden:
-                                    lines.append(f"🚫 禁用字体: {', '.join([f.get('text', '')[:15] for f in forbidden[:3]])}")
+                                    lines.append(f"禁用字体: {', '.join([f.get('text', '')[:15] for f in forbidden[:3]])}")
                                 else:
-                                    lines.append("✅ 字体: 无禁用字体")
+                                    lines.append("字体: 无禁用字体")
                                 lines.append("")
 
                         # 检查项摘要
@@ -371,7 +366,7 @@ class HistoryPage(QWidget):
                             fail_count = sum(1 for items in checks.values() for item in items if item.get("status") == "fail")
                             warn_count = sum(1 for items in checks.values() for item in items if item.get("status") == "warn")
                             pass_count = sum(1 for items in checks.values() for item in items if item.get("status") == "pass")
-                            lines.append(f"📋 检查项: ✅{pass_count} ⚠️{warn_count} ❌{fail_count}")
+                            lines.append(f"检查项: {pass_count} {warn_count} {fail_count}")
                             lines.append("")
 
                         # 问题列表
@@ -380,20 +375,20 @@ class HistoryPage(QWidget):
                             critical = [i for i in issues if i.get("severity") == "critical"]
                             major = [i for i in issues if i.get("severity") == "major"]
                             minor = [i for i in issues if i.get("severity") == "minor"]
-                            lines.append(f"⚠️ 问题: 🔴严重{len(critical)} 🟡主要{len(major)} 🟢次要{len(minor)}")
+                            lines.append(f"问题: 严重{len(critical)} 主要{len(major)} 次要{len(minor)}")
 
                     lines.append("")
 
         elif "report" in data:
             # 单图审核
             report = data.get("report", {})
-            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌"}.get(report.get("status"), "❓")
+            status_icon = {"pass": "", "warning": "", "fail": ""}.get(report.get("status"), "?")
             lines.append(f"【审核结果】评分: {report.get('score', 0)}/100 | 状态: {status_icon}")
             lines.append("")
 
             # 摘要
             if report.get("summary"):
-                lines.append("📝 总体评价:")
+                lines.append("总体评价:")
                 lines.append(report["summary"])
                 lines.append("")
 
@@ -407,19 +402,19 @@ class HistoryPage(QWidget):
                 logo = detection.get("logo", {})
                 if logo:
                     if logo.get("found"):
-                        pos_ok = "✅正确" if logo.get("position_correct") else "❌错误"
-                        lines.append(f"🔍 Logo: 已检测")
+                        pos_ok = "正确" if logo.get("position_correct") else "错误"
+                        lines.append(f"Logo: 已检测")
                         lines.append(f"   位置: {logo.get('position', '-')} ({pos_ok})")
                         if logo.get("size_percent"):
                             lines.append(f"   尺寸: {logo['size_percent']:.1f}%")
                     else:
-                        lines.append("🔍 Logo: 未检测到")
+                        lines.append("Logo: 未检测到")
                     lines.append("")
 
                 # 颜色
                 colors = detection.get("colors", [])
                 if colors:
-                    lines.append("🎨 主要颜色:")
+                    lines.append("主要颜色:")
                     for c in colors[:6]:
                         lines.append(f"   {c.get('hex', '')} {c.get('name', '')} - {c.get('percent', 0):.1f}%")
                     lines.append("")
@@ -427,9 +422,9 @@ class HistoryPage(QWidget):
                 # 文字
                 texts = detection.get("texts", [])
                 if texts:
-                    lines.append(f"📝 检测到的文字 ({len(texts)}条):")
+                    lines.append(f"检测到的文字 ({len(texts)}条):")
                     for t in texts[:8]:
-                        lines.append(f"   • {t[:50]}{'...' if len(t) > 50 else ''}")
+                        lines.append(f"   * {t[:50]}{'...' if len(t) > 50 else ''}")
                     if len(texts) > 8:
                         lines.append(f"   ... 还有 {len(texts) - 8} 条")
                     lines.append("")
@@ -437,10 +432,10 @@ class HistoryPage(QWidget):
                 # 字体
                 fonts = detection.get("fonts", [])
                 if fonts:
-                    lines.append("🔤 字体检测:")
+                    lines.append("字体检测:")
                     for f in fonts[:5]:
-                        status = "🚫禁用" if f.get("is_forbidden") else "✅正常"
-                        lines.append(f"   • {f.get('text', '')[:20]}: {f.get('font_family', '-')} ({status})")
+                        status = "禁用" if f.get("is_forbidden") else "正常"
+                        lines.append(f"   * {f.get('text', '')[:20]}: {f.get('font_family', '-')} ({status})")
                     lines.append("")
 
             # 检查项
@@ -457,17 +452,17 @@ class HistoryPage(QWidget):
                     "style_checks": "风格检查"
                 }
 
-                status_icons = {"pass": "✅", "warn": "⚠️", "fail": "❌"}
+                status_icons = {"pass": "", "warn": "", "fail": ""}
 
                 for check_type, items in checks.items():
                     if items:
                         # 统计
                         fail_cnt = sum(1 for item in items if item.get("status") == "fail")
                         if fail_cnt > 0:
-                            lines.append(f"📋 {check_titles.get(check_type, check_type)}:")
+                            lines.append(f"{check_titles.get(check_type, check_type)}:")
                             for item in items:
                                 if item.get("status") == "fail":
-                                    icon = status_icons.get(item.get("status"), "❓")
+                                    icon = status_icons.get(item.get("status"), "?")
                                     lines.append(f"   {icon} {item.get('code', '')} {item.get('name', '')}")
                                     lines.append(f"      {item.get('detail', '')[:80]}")
                             lines.append("")
@@ -483,25 +478,25 @@ class HistoryPage(QWidget):
                 minor = [i for i in issues if i.get("severity") == "minor"]
 
                 if critical:
-                    lines.append("🔴 严重问题:")
+                    lines.append("严重问题:")
                     for issue in critical:
-                        lines.append(f"   • {issue.get('description', '')}")
+                        lines.append(f"   * {issue.get('description', '')}")
                         if issue.get("suggestion"):
-                            lines.append(f"     💡 {issue['suggestion'][:60]}")
+                            lines.append(f"     建议: {issue['suggestion'][:60]}")
                     lines.append("")
 
                 if major:
-                    lines.append("🟡 主要问题:")
+                    lines.append("主要问题:")
                     for issue in major:
-                        lines.append(f"   • {issue.get('description', '')}")
+                        lines.append(f"   * {issue.get('description', '')}")
                         if issue.get("suggestion"):
-                            lines.append(f"     💡 {issue['suggestion'][:60]}")
+                            lines.append(f"     建议: {issue['suggestion'][:60]}")
                     lines.append("")
 
                 if minor:
-                    lines.append("🟢 次要问题:")
+                    lines.append("次要问题:")
                     for issue in minor[:5]:
-                        lines.append(f"   • {issue.get('description', '')}")
+                        lines.append(f"   * {issue.get('description', '')}")
                     if len(minor) > 5:
                         lines.append(f"   ... 还有 {len(minor) - 5} 个次要问题")
 
@@ -510,7 +505,13 @@ class HistoryPage(QWidget):
     def _on_export(self, format_type: str):
         """导出报告"""
         if not hasattr(self, '_current_full_report') or not self._current_full_report:
-            QMessageBox.warning(self, "警告", "请先选择一条记录")
+            InfoBar.warning(
+                title="警告",
+                content="请先选择一条记录",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
 
         export_dir = get_app_dir() / "data" / "exports"
@@ -527,7 +528,13 @@ class HistoryPage(QWidget):
             if file_path:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(self._current_full_report, f, ensure_ascii=False, indent=2)
-                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+                InfoBar.success(
+                    title="成功",
+                    content=f"已导出到:\n{file_path}",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
 
         else:  # markdown
             file_path, _ = QFileDialog.getSaveFileName(
@@ -539,7 +546,13 @@ class HistoryPage(QWidget):
                 md_content = self._report_to_markdown(self._current_full_report)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(md_content)
-                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+                InfoBar.success(
+                    title="成功",
+                    content=f"已导出到:\n{file_path}",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
 
     def _report_to_markdown(self, data: dict) -> str:
         """将报告转换为Markdown - 完整版"""
@@ -572,7 +585,7 @@ class HistoryPage(QWidget):
 
                 report = r.get("report", {})
                 if report:
-                    status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过", "error": "🔴 错误"}
+                    status_map = {"pass": " 通过", "warning": " 需修改", "fail": " 不通过", "error": " 错误"}
                     lines.append(f"**评分**: {report.get('score', 0)}/100")
                     lines.append(f"**状态**: {status_map.get(r.get('status'), r.get('status', '-'))}")
                     lines.append("")
@@ -601,7 +614,7 @@ class HistoryPage(QWidget):
                                 if logo.get("size_percent"):
                                     lines.append(f"- **尺寸占比**: {logo['size_percent']:.1f}%")
                                 if logo.get("position_correct") is not None:
-                                    pos_status = "✅ 正确" if logo["position_correct"] else "❌ 错误"
+                                    pos_status = " 正确" if logo["position_correct"] else " 错误"
                                     lines.append(f"- **位置正确**: {pos_status}")
                             else:
                                 lines.append("- **检测到Logo**: 否")
@@ -635,7 +648,7 @@ class HistoryPage(QWidget):
                             lines.append("#### 字体检测")
                             lines.append("")
                             for f in fonts:
-                                status = "🚫 禁用" if f.get("is_forbidden") else "✅ 正常"
+                                status = " 禁用" if f.get("is_forbidden") else " 正常"
                                 lines.append(f"- **{f.get('text', '')}**: {f.get('font_family', '')} ({status})")
                             lines.append("")
 
@@ -653,14 +666,14 @@ class HistoryPage(QWidget):
                             "style_checks": "风格检查"
                         }
 
-                        status_icons = {"pass": "✅", "warn": "⚠️", "fail": "❌"}
+                        status_icons = {"pass": "", "warn": "", "fail": ""}
 
                         for check_type, items in checks.items():
                             if items:
                                 lines.append(f"#### {check_titles.get(check_type, check_type)}")
                                 lines.append("")
                                 for item in items:
-                                    icon = status_icons.get(item.get("status"), "❓")
+                                    icon = status_icons.get(item.get("status"), "?")
                                     lines.append(f"- {icon} **{item.get('code', '')}** {item.get('name', '')}: {item.get('detail', '')}")
                                 lines.append("")
 
@@ -675,30 +688,30 @@ class HistoryPage(QWidget):
                         minor = [i for i in issues if i.get("severity") == "minor"]
 
                         if critical:
-                            lines.append("#### 🔴 严重问题")
+                            lines.append("#### 严重问题")
                             lines.append("")
                             for issue in critical:
                                 lines.append(f"- {issue.get('description', '')}")
                                 if issue.get("suggestion"):
-                                    lines.append(f"  - 💡 建议: {issue['suggestion']}")
+                                    lines.append(f"  - 建议: {issue['suggestion']}")
                             lines.append("")
 
                         if major:
-                            lines.append("#### 🟡 主要问题")
+                            lines.append("#### 主要问题")
                             lines.append("")
                             for issue in major:
                                 lines.append(f"- {issue.get('description', '')}")
                                 if issue.get("suggestion"):
-                                    lines.append(f"  - 💡 建议: {issue['suggestion']}")
+                                    lines.append(f"  - 建议: {issue['suggestion']}")
                             lines.append("")
 
                         if minor:
-                            lines.append("#### 🟢 次要问题")
+                            lines.append("#### 次要问题")
                             lines.append("")
                             for issue in minor:
                                 lines.append(f"- {issue.get('description', '')}")
                                 if issue.get("suggestion"):
-                                    lines.append(f"  - 💡 建议: {issue['suggestion']}")
+                                    lines.append(f"  - 建议: {issue['suggestion']}")
                             lines.append("")
 
                 lines.append("---")
@@ -707,7 +720,7 @@ class HistoryPage(QWidget):
         elif "report" in data:
             # 单图报告
             report = data.get("report", {})
-            status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过"}
+            status_map = {"pass": " 通过", "warning": " 需修改", "fail": " 不通过"}
             lines.extend([
                 f"**评分**: {report.get('score', 0)}/100",
                 f"**状态**: {status_map.get(report.get('status'), report.get('status', '-'))}",
@@ -740,7 +753,7 @@ class HistoryPage(QWidget):
                         if logo.get("size_percent"):
                             lines.append(f"- **尺寸占比**: {logo['size_percent']:.1f}%")
                         if logo.get("position_correct") is not None:
-                            pos_status = "✅ 正确" if logo["position_correct"] else "❌ 错误"
+                            pos_status = " 正确" if logo["position_correct"] else " 错误"
                             lines.append(f"- **位置正确**: {pos_status}")
                     else:
                         lines.append("- **检测到Logo**: 否")
@@ -774,7 +787,7 @@ class HistoryPage(QWidget):
                     lines.append("### 字体检测")
                     lines.append("")
                     for f in fonts:
-                        status = "🚫 禁用" if f.get("is_forbidden") else "✅ 正常"
+                        status = " 禁用" if f.get("is_forbidden") else " 正常"
                         lines.append(f"- **{f.get('text', '')}**: {f.get('font_family', '')} ({status})")
                     lines.append("")
 
@@ -792,14 +805,14 @@ class HistoryPage(QWidget):
                     "style_checks": "风格检查"
                 }
 
-                status_icons = {"pass": "✅", "warn": "⚠️", "fail": "❌"}
+                status_icons = {"pass": "", "warn": "", "fail": ""}
 
                 for check_type, items in checks.items():
                     if items:
                         lines.append(f"### {check_titles.get(check_type, check_type)}")
                         lines.append("")
                         for item in items:
-                            icon = status_icons.get(item.get("status"), "❓")
+                            icon = status_icons.get(item.get("status"), "?")
                             lines.append(f"- {icon} **{item.get('code', '')}** {item.get('name', '')}: {item.get('detail', '')}")
                         lines.append("")
 
@@ -814,30 +827,30 @@ class HistoryPage(QWidget):
                 minor = [i for i in issues if i.get("severity") == "minor"]
 
                 if critical:
-                    lines.append("### 🔴 严重问题")
+                    lines.append("### 严重问题")
                     lines.append("")
                     for issue in critical:
                         lines.append(f"- {issue.get('description', '')}")
                         if issue.get("suggestion"):
-                            lines.append(f"  - 💡 建议: {issue['suggestion']}")
+                            lines.append(f"  - 建议: {issue['suggestion']}")
                     lines.append("")
 
                 if major:
-                    lines.append("### 🟡 主要问题")
+                    lines.append("### 主要问题")
                     lines.append("")
                     for issue in major:
                         lines.append(f"- {issue.get('description', '')}")
                         if issue.get("suggestion"):
-                            lines.append(f"  - 💡 建议: {issue['suggestion']}")
+                            lines.append(f"  - 建议: {issue['suggestion']}")
                     lines.append("")
 
                 if minor:
-                    lines.append("### 🟢 次要问题")
+                    lines.append("### 次要问题")
                     lines.append("")
                     for issue in minor:
                         lines.append(f"- {issue.get('description', '')}")
                         if issue.get("suggestion"):
-                            lines.append(f"  - 💡 建议: {issue['suggestion']}")
+                            lines.append(f"  - 建议: {issue['suggestion']}")
                     lines.append("")
 
         return "\n".join(lines)
@@ -845,21 +858,35 @@ class HistoryPage(QWidget):
     def _on_delete_selected(self):
         """删除选中的记录"""
         if not self.current_report:
-            QMessageBox.warning(self, "警告", "请先选择要删除的记录")
+            InfoBar.warning(
+                title="警告",
+                content="请先选择要删除的记录",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
 
         batch_id = self.current_report.get("batch_id", "")
         if not batch_id:
-            QMessageBox.warning(self, "警告", "无法获取记录ID")
+            InfoBar.warning(
+                title="警告",
+                content="无法获取记录ID",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
 
-        reply = QMessageBox.question(
-            self, "确认删除",
+        box = MessageBox(
+            "确认删除",
             f"确定要删除这条记录吗？\n时间: {self.current_report.get('time', '-')}\n品牌: {self.current_report.get('brand_name', '-')}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            self
         )
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if box.exec():
             # 删除JSON文件
             report_file = self.reports_dir / f"{batch_id}.json"
             if report_file.exists():
@@ -889,17 +916,25 @@ class HistoryPage(QWidget):
 
             # 刷新列表并更新统计
             self.refresh()
-            QMessageBox.information(self, "成功", "记录已删除")
+            InfoBar.success(
+                title="成功",
+                content="记录已删除",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
 
     def _on_clear_all(self):
         """清空所有历史"""
-        reply = QMessageBox.question(
-            self, "确认清空",
+        box = MessageBox(
+            "确认清空",
             "确定要清空所有历史记录吗？\n此操作不可恢复！",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            self
         )
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if box.exec():
             # 删除所有JSON文件
             for f in self.reports_dir.glob("*.json"):
                 f.unlink()
@@ -916,4 +951,10 @@ class HistoryPage(QWidget):
             self.refresh()
             self.detail_text.clear()
             self._current_full_report = None
-            QMessageBox.information(self, "成功", "历史记录已清空")
+            InfoBar.success(
+                title="成功",
+                content="历史记录已清空",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
