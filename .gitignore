@@ -22,9 +22,21 @@ venv/
 logs/
 
 # User data (not to be packaged)
-data/audit_history/
-data/exports/
-data/uploads/
-data/rules/
-# Third-party docs
-docs/PyQt-Fluent-Widgets/
+data/
+
+# Test files
+test/
+
+# Documentation
+docs/
+
+# Windows Zone.Identifier files
+*:Zone.Identifier
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
