@@ -1,5 +1,13 @@
 [
   {
+    "batch_id": "batch_20260325_164248_bef70f",
+    "time": "2026-03-25 16:42:48",
+    "brand_name": "默认规范",
+    "file_count": 2,
+    "status": "completed",
+    "score": 40.0
+  },
+  {
     "batch_id": "batch_20260325_162516_bf8707",
     "time": "2026-03-25 16:25:16",
     "brand_name": "默认规范",

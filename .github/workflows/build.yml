@@ -1,0 +1,172 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 推送 v 开头的 tag 时触发，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: '版本号 (如 1.0.0)'
+        required: false
+        default: '1.0.0'
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            ext: .exe
+            artifact: windows
+          - os: ubuntu-latest
+            name: Linux
+            ext: ''
+            artifact: linux
+          - os: macos-latest
+            name: macOS
+            ext: ''
+            artifact: macos
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Create data directories
+        run: |
+          mkdir -p data/rules
+          mkdir -p data/audit_history
+          mkdir -p data/exports
+          mkdir -p data/uploads
+
+      - name: Build with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller build.spec --noconfirm --clean
+          cd dist
+          if exist "品牌合规审核平台.exe" (
+            mkdir "品牌合规审核平台"
+            move "品牌合规审核平台.exe" "品牌合规审核平台\"
+            xcopy /e /i /y "..\data" "品牌合规审核平台\data"
+            xcopy /e /i /y "..\config" "品牌合规审核平台\config"
+          )
+
+      - name: Build with PyInstaller (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller build.spec --noconfirm --clean
+          cd dist
+          if [ -f "BrandAudit" ]; then
+            mkdir -p "品牌合规审核平台"
+            mv BrandAudit "品牌合规审核平台/"
+            chmod +x "品牌合规审核平台/BrandAudit"
+            cp -r ../data "品牌合规审核平台/"
+            cp -r ../config "品牌合规审核平台/"
+            # 创建启动脚本
+            echo '#!/bin/bash' > "品牌合规审核平台/启动程序.sh"
+            echo 'cd "$(dirname "$0")"' >> "品牌合规审核平台/启动程序.sh"
+            echo './BrandAudit "$@"' >> "品牌合规审核平台/启动程序.sh"
+            chmod +x "品牌合规审核平台/启动程序.sh"
+          fi
+
+      - name: Build with PyInstaller (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller build.spec --noconfirm --clean
+          cd dist
+          if [ -d "品牌合规审核平台.app" ]; then
+            mkdir -p "品牌合规审核平台"
+            cp -r "品牌合规审核平台.app" "品牌合规审核平台/"
+            cp -r ../data "品牌合规审核平台/"
+            cp -r ../config "品牌合规审核平台/"
+            # 创建启动脚本
+            echo '#!/bin/bash' > "品牌合规审核平台/启动程序.command"
+            echo 'cd "$(dirname "$0")"' >> "品牌合规审核平台/启动程序.command"
+            echo 'open "品牌合规审核平台.app"' >> "品牌合规审核平台/启动程序.command"
+            chmod +x "品牌合规审核平台/启动程序.command"
+          fi
+
+      - name: Create ZIP archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dist
+          Compress-Archive -Path "品牌合规审核平台" -DestinationPath "品牌合规审核平台-Windows.zip"
+
+      - name: Create ZIP archive (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          zip -r "品牌合规审核平台-${{ matrix.name }}.zip" "品牌合规审核平台"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/品牌合规审核平台-${{ matrix.name }}.zip
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: 品牌合规审核平台 v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## 品牌合规审核平台 v${{ steps.version.outputs.VERSION }}
+
+            ### 下载说明
+            - **Windows**: 下载 `品牌合规审核平台-Windows.zip`，解压后运行 `品牌合规审核平台.exe`
+            - **Linux**: 下载 `品牌合规审核平台-Linux.zip`，解压后运行 `./启动程序.sh`
+            - **macOS**: 下载 `品牌合规审核平台-macOS.zip`，解压后双击 `.app` 文件
+
+            ### 使用步骤
+            1. 首次使用请先在 **API设置** 中配置 API Key
+            2. 在 **规范管理** 中上传品牌规范文档
+            3. 在 **设计审核** 中上传设计稿进行审核
+
+            ### 数据存储
+            所有数据保存在程序目录下的 `data/` 文件夹中
+          files: |
+            artifacts/windows/*.zip
+            artifacts/linux/*.zip
+            artifacts/macos/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
