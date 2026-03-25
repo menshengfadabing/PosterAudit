@@ -5,10 +5,10 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon as FIF,
-    InfoBar, InfoBarPosition, setTheme, Theme
+    InfoBar, InfoBarPosition, setTheme, Theme, setThemeColor
 )
 
-from gui.pages import SettingsPage, AuditPage, HistoryPage
+from gui.pages import SettingsPage, AuditPage, HistoryPage, RulesPage
 from gui.widgets import ProgressPanel
 
 
@@ -17,6 +17,10 @@ class MainWindow(FluentWindow):
 
     def __init__(self):
         super().__init__()
+
+        # 设置主题色 - 深蓝色
+        setThemeColor('#1a5fb4')
+        setTheme(Theme.LIGHT)
 
         self.setWindowTitle("品牌合规性智能审核平台")
         self.setMinimumSize(1400, 900)
@@ -31,24 +35,34 @@ class MainWindow(FluentWindow):
         # 连接信号
         self._connect_signals()
 
+        # 创建进度面板
+        self._create_progress_panel()
+
     def _create_pages(self):
         """创建子页面"""
         self.settingsPage = SettingsPage(self)
+        self.rulesPage = RulesPage(self)
         self.auditPage = AuditPage(self)
         self.historyPage = HistoryPage(self)
 
     def _init_navigation(self):
         """初始化导航栏"""
-        # 添加导航项
+        # 添加导航项 - 按功能分组
         self.addSubInterface(
             self.settingsPage,
             FIF.SETTING,
-            "系统设置",
+            "API设置",
+            NavigationItemPosition.TOP
+        )
+        self.addSubInterface(
+            self.rulesPage,
+            FIF.BOOK_SHELF,
+            "规范管理",
             NavigationItemPosition.TOP
         )
         self.addSubInterface(
             self.auditPage,
-            FIF.PALETTE,
+            FIF.DICTIONARY,
             "设计审核",
             NavigationItemPosition.TOP
         )
@@ -69,23 +83,29 @@ class MainWindow(FluentWindow):
         self.auditPage.progress_updated.connect(self._on_progress_updated)
         self.auditPage.task_finished.connect(self._on_task_finished)
 
-        # 连接设置页面的进度信号
-        self.settingsPage.task_started.connect(self._on_task_started)
-        self.settingsPage.progress_updated.connect(self._on_progress_updated)
-        self.settingsPage.task_finished.connect(self._on_task_finished)
+        # 连接规范页面的进度信号
+        self.rulesPage.task_started.connect(self._on_task_started)
+        self.rulesPage.progress_updated.connect(self._on_progress_updated)
+        self.rulesPage.task_finished.connect(self._on_task_finished)
+
+    def _create_progress_panel(self):
+        """创建进度面板"""
+        self.progressPanel = ProgressPanel(self)
+        self.progressPanel.hide()
 
     def _on_task_started(self, task_name: str):
         """任务开始"""
-        # 在底部显示进度提示
-        pass
+        self.progressPanel.show()
+        self.progressPanel.start_task(task_name)
 
     def _on_progress_updated(self, percent: int, message: str, log_message: str):
         """进度更新"""
-        # 可以在这里更新状态栏或其他UI
-        pass
+        self.progressPanel.update_progress(percent, message, log_message)
 
     def _on_task_finished(self, success: bool, message: str):
         """任务完成"""
+        self.progressPanel.finish_task(success, message)
+
         if success:
             InfoBar.success(
                 title="完成",
