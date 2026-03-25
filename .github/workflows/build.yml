@@ -3,8 +3,8 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # 推送 v 开头的 tag 时触发，如 v1.0.0
-  workflow_dispatch:  # 允许手动触发
+      - 'v*'
+  workflow_dispatch:
     inputs:
       version:
         description: '版本号 (如 1.0.0)'
@@ -20,15 +20,12 @@ jobs:
         include:
           - os: windows-latest
             name: Windows
-            ext: .exe
             artifact: windows
           - os: ubuntu-latest
             name: Linux
-            ext: ''
             artifact: linux
           - os: macos-latest
             name: macOS
-            ext: ''
             artifact: macos
 
     steps:
@@ -48,15 +45,16 @@ jobs:
 
       - name: Create data directories
         run: |
-          mkdir -p data/rules
-          mkdir -p data/audit_history
-          mkdir -p data/exports
-          mkdir -p data/uploads
+          python -c "from pathlib import Path; [Path(f'data/{d}').mkdir(parents=True, exist_ok=True) for d in ['rules', 'audit_history', 'exports', 'uploads']]"
+        shell: bash
 
-      - name: Build with PyInstaller (Windows)
+      - name: Build with PyInstaller
+        run: pyinstaller build.spec --noconfirm --clean
+
+      - name: Package Windows
         if: runner.os == 'Windows'
+        shell: cmd
         run: |
-          pyinstaller build.spec --noconfirm --clean
           cd dist
           if exist "品牌合规审核平台.exe" (
             mkdir "品牌合规审核平台"
@@ -65,10 +63,9 @@ jobs:
             xcopy /e /i /y "..\config" "品牌合规审核平台\config"
           )
 
-      - name: Build with PyInstaller (Linux)
+      - name: Package Linux
         if: runner.os == 'Linux'
         run: |
-          pyinstaller build.spec --noconfirm --clean
           cd dist
           if [ -f "BrandAudit" ]; then
             mkdir -p "品牌合规审核平台"
@@ -76,37 +73,38 @@ jobs:
             chmod +x "品牌合规审核平台/BrandAudit"
             cp -r ../data "品牌合规审核平台/"
             cp -r ../config "品牌合规审核平台/"
-            # 创建启动脚本
-            echo '#!/bin/bash' > "品牌合规审核平台/启动程序.sh"
-            echo 'cd "$(dirname "$0")"' >> "品牌合规审核平台/启动程序.sh"
-            echo './BrandAudit "$@"' >> "品牌合规审核平台/启动程序.sh"
+            cat > "品牌合规审核平台/启动程序.sh" << 'EOF'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          ./BrandAudit "$@"
+          EOF
             chmod +x "品牌合规审核平台/启动程序.sh"
           fi
 
-      - name: Build with PyInstaller (macOS)
+      - name: Package macOS
         if: runner.os == 'macOS'
         run: |
-          pyinstaller build.spec --noconfirm --clean
           cd dist
           if [ -d "品牌合规审核平台.app" ]; then
             mkdir -p "品牌合规审核平台"
             cp -r "品牌合规审核平台.app" "品牌合规审核平台/"
             cp -r ../data "品牌合规审核平台/"
             cp -r ../config "品牌合规审核平台/"
-            # 创建启动脚本
-            echo '#!/bin/bash' > "品牌合规审核平台/启动程序.command"
-            echo 'cd "$(dirname "$0")"' >> "品牌合规审核平台/启动程序.command"
-            echo 'open "品牌合规审核平台.app"' >> "品牌合规审核平台/启动程序.command"
+            cat > "品牌合规审核平台/启动程序.command" << 'EOF'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          open "品牌合规审核平台.app"
+          EOF
             chmod +x "品牌合规审核平台/启动程序.command"
           fi
 
-      - name: Create ZIP archive (Windows)
+      - name: Create ZIP (Windows)
         if: runner.os == 'Windows'
         run: |
           cd dist
           Compress-Archive -Path "品牌合规审核平台" -DestinationPath "品牌合规审核平台-Windows.zip"
 
-      - name: Create ZIP archive (Linux/macOS)
+      - name: Create ZIP (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           cd dist
@@ -123,9 +121,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Get version
         id: version
         run: |
@@ -139,9 +134,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -166,7 +158,5 @@ jobs:
             artifacts/windows/*.zip
             artifacts/linux/*.zip
             artifacts/macos/*.zip
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
