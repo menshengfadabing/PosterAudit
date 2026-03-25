@@ -15,21 +15,42 @@ a = Analysis(
         ('config', 'config'),
     ],
     hiddenimports=[
+        # Qt
         'pyside6',
+        'PySide6',
+        'PySide6.QtCore',
+        'PySide6.QtGui',
+        'PySide6.QtWidgets',
+        # LLM
         'langchain_openai',
         'langchain_core',
         'openai',
+        # Document parsing
         'pymupdf',
         'fitz',
         'pptx',
+        'python_pptx',
+        'docx',
+        'python_docx',
+        'openpyxl',
+        'xlrd',
         'PIL',
+        # Data
         'pydantic',
         'pydantic_settings',
+        # Others
+        'httpx',
+        'dotenv',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tkinter',
+        'unittest',
+        'test',
+        'tests',
+    ],
     noarchive=False,
 )
 

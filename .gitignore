@@ -8,3 +8,21 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# User data (not to be packaged)
+data/audit_history/
+data/exports/
+data/uploads/
+data/rules/
