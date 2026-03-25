@@ -21,7 +21,12 @@ def get_app_dir() -> Path:
 class Settings(BaseSettings):
     """应用配置"""
 
-    # API配置
+    # 规则解析模型（纯文本）
+    deepseek_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v3-2-251201"
+
+    # 海报分析模型（多模态）
     openai_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
     openai_api_key: str = ""
     doubao_model: str = "doubao-seed-2-0-pro-260215"
