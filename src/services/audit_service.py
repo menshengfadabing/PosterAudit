@@ -334,7 +334,6 @@ class AuditService:
         # 计算单次请求可容纳的最大图片数
         if max_images_per_request is None:
             max_images_per_request = llm_service.calculate_max_images(image_sizes, rules_text)
-            logger.info(f"动态计算: 单次请求最多可处理 {max_images_per_request} 张图片")
 
         # 分批处理
         results = []
@@ -357,22 +356,53 @@ class AuditService:
             batch_time = time.time() - batch_start
             logger.info(f"批次 {batch_idx + 1} 完成，耗时: {batch_time:.1f}秒")
 
-            # 转换结果格式
-            for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
-                try:
-                    report = self._build_report(result)
-                    results.append({
-                        "file_name": Path(path).name,
-                        "status": "success",
-                        "report": report
-                    })
-                except Exception as e:
-                    logger.error(f"结果转换失败 [{path}]: {e}")
-                    results.append({
-                        "file_name": Path(path).name,
-                        "status": "error",
-                        "error": str(e)
-                    })
+            # 检查是否有有效结果（如果全部失败则回退到单图审核）
+            has_valid_result = any(
+                r.get("score", 0) > 0 or r.get("status") != "fail"
+                for r in batch_results
+            )
+
+            if not has_valid_result and len(batch_images) > 1:
+                logger.warning(f"批次 {batch_idx + 1} 合并请求全部失败，回退到并发单图审核")
+                # 回退到并发单图审核
+                for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
+                    try:
+                        # 单独审核每张图片
+                        single_result = llm_service.audit_image(
+                            image_base64=batch_images[i]["base64"],
+                            image_format=batch_images[i]["format"],
+                            rules_text=rules_text,
+                        )
+                        report = self._build_report(single_result)
+                        results.append({
+                            "file_name": Path(path).name,
+                            "status": "success",
+                            "report": report
+                        })
+                    except Exception as e:
+                        logger.error(f"单图审核失败 [{path}]: {e}")
+                        results.append({
+                            "file_name": Path(path).name,
+                            "status": "error",
+                            "error": str(e)
+                        })
+            else:
+                # 转换结果格式
+                for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
+                    try:
+                        report = self._build_report(result)
+                        results.append({
+                            "file_name": Path(path).name,
+                            "status": "success",
+                            "report": report
+                        })
+                    except Exception as e:
+                        logger.error(f"结果转换失败 [{path}]: {e}")
+                        results.append({
+                            "file_name": Path(path).name,
+                            "status": "error",
+                            "error": str(e)
+                        })
 
             if progress_callback:
                 completed = min((batch_idx + 1) * max_images_per_request, total)
