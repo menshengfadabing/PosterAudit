@@ -26,3 +26,5 @@ data/audit_history/
 data/exports/
 data/uploads/
 data/rules/
+# Third-party docs
+docs/PyQt-Fluent-Widgets/
