@@ -223,6 +223,7 @@ class AuditService:
         brand_id: str | None = None,
         max_concurrent: int = 5,
         progress_callback=None,
+        result_callback=None,
     ) -> list:
         """
         并发批量审核（方案A：多个独立API请求）
@@ -231,7 +232,8 @@ class AuditService:
             image_paths: 图片路径列表
             brand_id: 品牌ID
             max_concurrent: 最大并发数
-            progress_callback: 进度回调函数
+            progress_callback: 进度回调函数 (completed, total, message)
+            result_callback: 单条结果回调函数 (result) - 用于流式返回
 
         Returns:
             审核结果列表
@@ -256,10 +258,11 @@ class AuditService:
             for future in as_completed(future_to_index):
                 index = future_to_index[future]
                 try:
+                    report = future.result()
                     results[index] = {
                         "file_name": Path(image_paths[index]).name,
                         "status": "success",
-                        "report": future.result()
+                        "report": report
                     }
                 except Exception as e:
                     logger.error(f"审核失败 [{image_paths[index]}]: {e}")
@@ -272,6 +275,10 @@ class AuditService:
                 completed += 1
                 elapsed = time.time() - start_time
                 logger.info(f"进度: {completed}/{total}, 已耗时: {elapsed:.1f}秒")
+
+                # 流式返回单条结果
+                if result_callback:
+                    result_callback(results[index], index, completed, total)
 
                 if progress_callback:
                     progress_callback(completed, total, f"已完成 {completed}/{total}")
@@ -288,6 +295,7 @@ class AuditService:
         brand_id: str | None = None,
         max_images_per_request: int = None,
         progress_callback=None,
+        result_callback=None,
     ) -> list:
         """
         合并请求批量审核（方案B：单次API调用处理多张图片）
@@ -296,7 +304,8 @@ class AuditService:
             image_paths: 图片路径列表
             brand_id: 品牌ID
             max_images_per_request: 单次请求最大图片数（None则自动计算）
-            progress_callback: 进度回调函数
+            progress_callback: 进度回调函数 (completed, total, message)
+            result_callback: 单条结果回调函数 (result) - 用于流式返回
 
         Returns:
             审核结果列表
@@ -374,39 +383,53 @@ class AuditService:
                             rules_text=rules_text,
                         )
                         report = self._build_report(single_result)
-                        results.append({
+                        result_item = {
                             "file_name": Path(path).name,
                             "status": "success",
                             "report": report
-                        })
+                        }
+                        results.append(result_item)
+                        # 流式返回
+                        if result_callback:
+                            result_callback(result_item, len(results), len(results), total)
                     except Exception as e:
                         logger.error(f"单图审核失败 [{path}]: {e}")
-                        results.append({
+                        result_item = {
                             "file_name": Path(path).name,
                             "status": "error",
                             "error": str(e)
-                        })
+                        }
+                        results.append(result_item)
+                        if result_callback:
+                            result_callback(result_item, len(results), len(results), total)
             else:
                 # 转换结果格式
                 for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
                     try:
                         report = self._build_report(result)
-                        results.append({
+                        result_item = {
                             "file_name": Path(path).name,
                             "status": "success",
                             "report": report
-                        })
+                        }
+                        results.append(result_item)
+                        # 流式返回
+                        if result_callback:
+                            result_callback(result_item, len(results), len(results), total)
                     except Exception as e:
                         logger.error(f"结果转换失败 [{path}]: {e}")
-                        results.append({
+                        result_item = {
                             "file_name": Path(path).name,
                             "status": "error",
                             "error": str(e)
-                        })
+                        }
+                        results.append(result_item)
+                        if result_callback:
+                            result_callback(result_item, len(results), len(results), total)
 
             if progress_callback:
-                completed = min((batch_idx + 1) * max_images_per_request, total)
-                progress_callback(completed, total, f"已完成批次 {batch_idx + 1}/{len(batches)}")
+                completed = len(results)
+                progress_callback(completed, total, f"已完成 {completed}/{total}")
 
         total_time = time.time() - start_time
         logger.info(f"合并请求批量审核完成: 总耗时: {total_time:.1f}秒, 平均每张: {total_time/total:.1f}秒")
