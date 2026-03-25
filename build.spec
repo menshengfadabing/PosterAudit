@@ -118,7 +118,7 @@ if sys.platform == 'darwin':
         console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
-        target_arch='universal2',
+        target_arch='arm64',  # GitHub Actions 使用 Apple Silicon 运行器
         codesign_identity=None,
         entitlements_file=None,
         icon='config/icon.icns' if (project_root / 'config' / 'icon.icns').exists() else None,
