@@ -1,19 +1,23 @@
-"""审核页面 - 单图/批量审核"""
+"""审核页面 - 单图/批量审核（Fluent风格）"""
 
 import json
 import logging
 from pathlib import Path
 from datetime import datetime
 import uuid
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QMessageBox, QSplitter, QFrame, QTextEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
-    QTabWidget, QComboBox, QCheckBox, QFileDialog, QScrollArea,
-    QGridLayout, QSpinBox, QSizePolicy
-)
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFileDialog
 from PySide6.QtGui import QColor, QPixmap
+
+from qfluentwidgets import (
+    ScrollArea, StrongBodyLabel, CaptionLabel, BodyLabel,
+    PushButton, PrimaryPushButton, ComboBox, SpinBox,
+    ProgressBar, TextEdit, TableWidget,
+    InfoBar, InfoBarPosition, MessageBox, CardWidget,
+    HeaderCardWidget, TabWidget, FluentIcon as FIF,
+    SubtitleLabel, TitleLabel
+)
+from PySide6.QtWidgets import QTableWidgetItem
 
 from gui.widgets import ImageDropArea
 from gui.utils import Worker
@@ -24,8 +28,8 @@ from src.utils.config import get_app_dir
 logger = logging.getLogger(__name__)
 
 
-class AuditPage(QWidget):
-    """审核页面"""
+class AuditPage(ScrollArea):
+    """审核页面 - Fluent风格"""
 
     # 进度信号: (percent, message, log_message)
     progress_updated = Signal(int, str, str)
@@ -36,6 +40,10 @@ class AuditPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("auditPage")
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         self.audit_result = None
         self._init_ui()
 
@@ -46,136 +54,69 @@ class AuditPage(QWidget):
         self._load_batch_brand_list()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
+        # 主容器
+        self.view = QWidget()
+        self.setWidget(self.view)
+
+        layout = QVBoxLayout(self.view)
+        layout.setContentsMargins(36, 20, 36, 20)
         layout.setSpacing(20)
 
         # 标题
-        title = QLabel("设计稿审核")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title = TitleLabel("设计稿审核")
         layout.addWidget(title)
 
         # 提示信息
-        hint = QLabel("对设计稿进行完整的品牌合规审核，支持单图和批量审核")
-        hint.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        hint = CaptionLabel("对设计稿进行完整的品牌合规审核，支持单图和批量审核")
         layout.addWidget(hint)
 
         # 标签页
-        tab_widget = QTabWidget()
-        tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                background-color: white;
-                font-size: 15px;
-            }
-            QTabBar::tab {
-                padding: 12px 30px;
-                margin-right: 2px;
-                background-color: #ecf0f1;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 15px;
-            }
-            QTabBar::tab:selected {
-                background-color: white;
-                font-weight: bold;
-            }
-        """)
+        self.tab_widget = TabWidget()
 
         # 单图审核标签
         single_tab = self._create_single_audit_tab()
-        tab_widget.addTab(single_tab, "单图审核")
+        self.tab_widget.addTab(single_tab, "单图审核")
 
         # 批量审核标签
         batch_tab = self._create_batch_audit_tab()
-        tab_widget.addTab(batch_tab, "批量审核")
+        self.tab_widget.addTab(batch_tab, "批量审核")
 
-        layout.addWidget(tab_widget)
+        layout.addWidget(self.tab_widget)
 
     def _create_single_audit_tab(self) -> QWidget:
         """创建单图审核标签页"""
         widget = QWidget()
         layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # 使用QSplitter实现可调整大小的面板
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #ddd;
-                width: 3px;
-            }
-        """)
+        layout.setContentsMargins(0, 16, 0, 0)
+        layout.setSpacing(16)
 
         # 左侧：设置区域
-        left_panel = QFrame()
-        left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        left_panel.setMinimumWidth(350)
+        left_card = CardWidget()
+        left_card.setMinimumWidth(380)
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setContentsMargins(20, 20, 20, 20)
+        left_layout.setSpacing(16)
 
-        # 创建滚动区域包裹左侧面板
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        left_content = QWidget()
-        left_layout = QVBoxLayout(left_content)
-        left_layout.setContentsMargins(15, 15, 15, 15)
-        left_layout.setSpacing(18)
+        # 审核设置
+        settings_label = StrongBodyLabel("审核设置")
+        left_layout.addWidget(settings_label)
 
         # 品牌选择
-        brand_group = QGroupBox("审核设置")
-        brand_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-        """)
-        brand_layout = QVBoxLayout(brand_group)
-
-        brand_row = QHBoxLayout()
-        brand_label = QLabel("品牌规范:")
-        brand_label.setStyleSheet("font-size: 15px;")
-        brand_row.addWidget(brand_label)
-        self.brand_combo = QComboBox()
-        self.brand_combo.setMinimumWidth(250)
-        self.brand_combo.setStyleSheet("""
-            QComboBox {
-                font-size: 15px;
-                padding: 8px;
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3498db;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 30px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-                font-size: 15px;
-            }
-        """)
-        self._load_brand_list()
-        brand_row.addWidget(self.brand_combo)
-        brand_layout.addLayout(brand_row)
+        brand_layout = QHBoxLayout()
+        brand_label = BodyLabel("品牌规范:")
+        brand_label.setFixedWidth(80)
+        self.brand_combo = ComboBox()
+        self.brand_combo.setMinimumWidth(260)
+        brand_layout.addWidget(brand_label)
+        brand_layout.addWidget(self.brand_combo)
+        brand_layout.addStretch()
+        left_layout.addLayout(brand_layout)
 
         # 压缩预设选择
-        compression_row = QHBoxLayout()
-        compression_label = QLabel("图片压缩:")
-        compression_label.setStyleSheet("font-size: 15px;")
-        compression_row.addWidget(compression_label)
-        self.single_compression_combo = QComboBox()
+        compression_layout = QHBoxLayout()
+        compression_label = BodyLabel("图片压缩:")
+        compression_label.setFixedWidth(80)
+        self.single_compression_combo = ComboBox()
         self.single_compression_combo.addItems([
             "均衡（推荐）",
             "高质量",
@@ -188,191 +129,116 @@ class AuditPage(QWidget):
             "高压缩：1280px/300KB/60%，最小传输量\n"
             "不压缩：原图传输，消耗更多Token"
         )
-        self.single_compression_combo.setStyleSheet("""
-            QComboBox {
-                font-size: 15px;
-                padding: 8px;
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3498db;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 30px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-                font-size: 15px;
-            }
-        """)
-        compression_row.addWidget(self.single_compression_combo)
-        brand_layout.addLayout(compression_row)
-
-        left_layout.addWidget(brand_group)
+        self.single_compression_combo.setMinimumWidth(260)
+        compression_layout.addWidget(compression_label)
+        compression_layout.addWidget(self.single_compression_combo)
+        compression_layout.addStretch()
+        left_layout.addLayout(compression_layout)
 
         # 图片选择
-        image_group = QGroupBox("设计稿图片")
-        image_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-        """)
-        image_layout = QVBoxLayout(image_group)
+        image_label = StrongBodyLabel("设计稿图片")
+        left_layout.addWidget(image_label)
+
         self.image_drop = ImageDropArea()
         self.image_drop.image_selected.connect(self._on_image_selected)
-        image_layout.addWidget(self.image_drop)
-        left_layout.addWidget(image_group)
+        left_layout.addWidget(self.image_drop)
 
         # 操作按钮
-        btn_layout = QHBoxLayout()
-        self.audit_btn = QPushButton("开始审核")
+        self.audit_btn = PrimaryPushButton("开始审核")
         self.audit_btn.clicked.connect(self._on_audit)
         self.audit_btn.setEnabled(False)
-        self.audit_btn.setMinimumHeight(50)
-        self.audit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 15px 50px;
-                border: none;
-                border-radius: 5px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #219a52;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
-        btn_layout.addWidget(self.audit_btn)
-        left_layout.addLayout(btn_layout)
+        self.audit_btn.setMinimumHeight(45)
+        left_layout.addWidget(self.audit_btn)
 
         # 进度
-        self.progress_bar = QProgressBar()
+        self.progress_bar = ProgressBar()
         self.progress_bar.setVisible(False)
         left_layout.addWidget(self.progress_bar)
 
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        self.status_label = CaptionLabel("")
         self.status_label.setWordWrap(True)
         left_layout.addWidget(self.status_label)
 
         left_layout.addStretch()
-
-        # 将左侧内容添加到滚动区域
-        left_scroll.setWidget(left_content)
-        splitter.addWidget(left_scroll)
+        layout.addWidget(left_card, 1)
 
         # 右侧：结果展示
-        right_panel = QFrame()
-        right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        right_panel.setMinimumWidth(500)
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(15, 15, 15, 15)
+        right_card = CardWidget()
+        right_card.setMinimumWidth(520)
+        right_layout = QVBoxLayout(right_card)
+        right_layout.setContentsMargins(20, 20, 20, 20)
+        right_layout.setSpacing(12)
 
         # 结果标题
-        result_title = QLabel("审核结果")
-        result_title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        result_title = StrongBodyLabel("审核结果")
         right_layout.addWidget(result_title)
 
         # 评分区域
-        score_frame = QFrame()
-        score_frame.setStyleSheet("background-color: #ecf0f1; border-radius: 10px; padding: 20px;")
-        score_layout = QGridLayout(score_frame)
+        score_card = CardWidget()
+        score_card.setBorderRadius(8)
+        score_layout = QHBoxLayout(score_card)
+        score_layout.setContentsMargins(20, 20, 20, 20)
 
-        self.score_label = QLabel("--")
-        self.score_label.setStyleSheet("font-size: 56px; font-weight: bold; color: #2c3e50;")
-        score_layout.addWidget(self.score_label, 0, 0)
+        self.score_label = TitleLabel("--")
+        score_layout.addWidget(self.score_label)
 
-        self.score_suffix = QLabel("/100")
-        self.score_suffix.setStyleSheet("font-size: 28px; color: #7f8c8d;")
-        score_layout.addWidget(self.score_suffix, 0, 1)
+        score_suffix = SubtitleLabel("/100")
+        score_layout.addWidget(score_suffix)
+        score_layout.addStretch()
 
-        self.status_badge = QLabel("")
-        self.status_badge.setStyleSheet("padding: 10px 20px; border-radius: 15px; font-weight: bold; font-size: 15px;")
-        score_layout.addWidget(self.status_badge, 0, 2)
+        self.status_badge = BodyLabel("")
+        self.status_badge.setStyleSheet("padding: 8px 16px; border-radius: 12px; font-weight: bold;")
+        score_layout.addWidget(self.status_badge)
 
-        self.issue_count_label = QLabel("问题数: --")
-        self.issue_count_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
-        score_layout.addWidget(self.issue_count_label, 1, 0, 1, 3)
+        right_layout.addWidget(score_card)
 
-        right_layout.addWidget(score_frame)
-
-        # 创建滚动区域显示详细结果
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
-
-        self.result_widget = QWidget()
-        self.result_layout = QVBoxLayout(self.result_widget)
-        self.result_layout.setSpacing(12)
+        # 问题数量
+        self.issue_count_label = CaptionLabel("问题数: --")
+        right_layout.addWidget(self.issue_count_label)
 
         # 摘要
-        self.summary_label = QLabel("")
+        self.summary_label = BodyLabel("")
         self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet("color: #34495e; padding: 15px; background-color: #f8f9fa; border-radius: 5px; font-size: 14px;")
         self.summary_label.setVisible(False)
-        self.result_layout.addWidget(self.summary_label)
+        right_layout.addWidget(self.summary_label)
 
         # 检测结果标题
-        detection_title = QLabel("检测结果")
-        detection_title.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
-        detection_title.setVisible(False)
-        self.result_layout.addWidget(detection_title)
-        self.detection_title = detection_title
+        self.detection_title = StrongBodyLabel("检测结果")
+        self.detection_title.setVisible(False)
+        right_layout.addWidget(self.detection_title)
 
         # 检测结果内容
-        self.detection_content = QLabel("")
+        self.detection_content = BodyLabel("")
         self.detection_content.setWordWrap(True)
-        self.detection_content.setStyleSheet("padding: 15px; background-color: #f0f7ff; border-radius: 5px; font-size: 14px;")
         self.detection_content.setVisible(False)
-        self.result_layout.addWidget(self.detection_content)
+        right_layout.addWidget(self.detection_content)
 
-        # 问题列表
-        issues_title = QLabel("问题列表")
-        issues_title.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
-        issues_title.setVisible(False)
-        self.result_layout.addWidget(issues_title)
-        self.issues_title = issues_title
+        # 问题列表标题
+        self.issues_title = StrongBodyLabel("问题列表")
+        self.issues_title.setVisible(False)
+        right_layout.addWidget(self.issues_title)
 
-        self.issues_table = QTableWidget()
+        # 问题表格
+        self.issues_table = TableWidget()
         self.issues_table.setColumnCount(4)
         self.issues_table.setHorizontalHeaderLabels(["类型", "严重程度", "描述", "建议"])
-        self.issues_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.issues_table.setStyleSheet("font-size: 14px;")
+        self.issues_table.horizontalHeader().setStretchLastSection(True)
         self.issues_table.setVisible(False)
-        self.result_layout.addWidget(self.issues_table)
+        right_layout.addWidget(self.issues_table)
 
-        self.result_layout.addStretch()
-        scroll.setWidget(self.result_widget)
-        right_layout.addWidget(scroll, 1)
+        right_layout.addStretch()
 
         # 提示信息
-        hint_label = QLabel("💡 提示：上方显示的是简化版结果，查看完整报告请点击导出JSON或Markdown")
-        hint_label.setStyleSheet("color: #7f8c8d; font-size: 12px; padding: 5px;")
-        hint_label.setWordWrap(True)
+        hint_label = CaptionLabel("上方显示简化结果，完整报告请点击导出")
         right_layout.addWidget(hint_label)
 
         # 导出按钮
         export_layout = QHBoxLayout()
-        self.export_json_btn = QPushButton("导出JSON")
-        self.export_json_btn.setStyleSheet("font-size: 15px;")
+        self.export_json_btn = PushButton("导出JSON")
         self.export_json_btn.clicked.connect(lambda: self._on_export("json"))
         self.export_json_btn.setEnabled(False)
 
-        self.export_md_btn = QPushButton("导出Markdown")
-        self.export_md_btn.setStyleSheet("font-size: 15px;")
+        self.export_md_btn = PushButton("导出Markdown")
         self.export_md_btn.clicked.connect(lambda: self._on_export("md"))
         self.export_md_btn.setEnabled(False)
 
@@ -381,12 +247,10 @@ class AuditPage(QWidget):
         export_layout.addWidget(self.export_md_btn)
         right_layout.addLayout(export_layout)
 
-        splitter.addWidget(right_panel)
+        layout.addWidget(right_card, 1)
 
-        # 设置初始比例
-        splitter.setSizes([400, 700])
-
-        layout.addWidget(splitter)
+        # 加载品牌列表
+        self._load_brand_list()
 
         return widget
 
@@ -394,82 +258,56 @@ class AuditPage(QWidget):
         """创建批量审核标签页"""
         widget = QWidget()
 
-        # 创建滚动区域包裹整个内容
-        batch_scroll = QScrollArea()
+        # 外层滚动区域
+        batch_scroll = ScrollArea()
         batch_scroll.setWidgetResizable(True)
-        batch_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         batch_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        layout.setContentsMargins(0, 16, 0, 0)
+        layout.setSpacing(16)
 
-        # 提示信息
-        hint_frame = QFrame()
-        hint_frame.setStyleSheet("background-color: #FEF3C7; border-radius: 8px; padding: 15px;")
-        hint_layout = QVBoxLayout(hint_frame)
-        hint_label = QLabel(
+        # 提示卡片
+        hint_card = CardWidget()
+        hint_card.setBorderRadius(8)
+        hint_layout = QVBoxLayout(hint_card)
+        hint_layout.setContentsMargins(20, 16, 20, 16)
+        hint_label = BodyLabel(
             "批量审核方案说明：\n"
             "• 并发请求：同时发送多个独立API请求，速度快但每张图都需传输规范Prompt\n"
             "• 合并请求：单次API调用处理多张图片，节省Prompt Token，响应解析更复杂\n"
             "• 图片压缩可显著减少Token消耗和传输时间"
         )
-        hint_label.setStyleSheet("color: #92400E; font-size: 14px;")
         hint_layout.addWidget(hint_label)
-        layout.addWidget(hint_frame)
+        layout.addWidget(hint_card)
 
-        # 设置区域
-        settings_group = QGroupBox("批量审核设置")
-        settings_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-        """)
-        settings_layout = QGridLayout(settings_group)
+        # 设置卡片
+        settings_card = CardWidget()
+        settings_card.setBorderRadius(8)
+        settings_layout = QVBoxLayout(settings_card)
+        settings_layout.setContentsMargins(20, 20, 20, 20)
         settings_layout.setSpacing(12)
 
+        settings_title = StrongBodyLabel("批量审核设置")
+        settings_layout.addWidget(settings_title)
+
         # 品牌选择
-        brand_label = QLabel("品牌规范:")
-        brand_label.setStyleSheet("font-size: 15px;")
-        settings_layout.addWidget(brand_label, 0, 0)
-        self.batch_brand_combo = QComboBox()
-        self.batch_brand_combo.setMinimumWidth(300)
-        self.batch_brand_combo.setStyleSheet("""
-            QComboBox {
-                font-size: 15px;
-                padding: 8px;
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3498db;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 30px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-                font-size: 15px;
-            }
-        """)
-        self._load_batch_brand_list()
-        settings_layout.addWidget(self.batch_brand_combo, 0, 1)
+        brand_row = QHBoxLayout()
+        brand_label = BodyLabel("品牌规范:")
+        brand_label.setFixedWidth(80)
+        self.batch_brand_combo = ComboBox()
+        self.batch_brand_combo.setMinimumWidth(320)
+        brand_row.addWidget(brand_label)
+        brand_row.addWidget(self.batch_brand_combo)
+        brand_row.addStretch()
+        settings_layout.addLayout(brand_row)
 
         # 审核方案选择
-        mode_label = QLabel("审核方案:")
-        mode_label.setStyleSheet("font-size: 15px;")
-        settings_layout.addWidget(mode_label, 1, 0)
-
-        self.audit_mode_combo = QComboBox()
+        mode_row = QHBoxLayout()
+        mode_label = BodyLabel("审核方案:")
+        mode_label.setFixedWidth(80)
+        self.audit_mode_combo = ComboBox()
         self.audit_mode_combo.addItems([
             "并发请求（推荐，速度快）",
             "合并请求（省Token，复杂）"
@@ -478,52 +316,31 @@ class AuditPage(QWidget):
             "并发请求：同时发送多个API请求，速度更快\n"
             "合并请求：单次API处理多图，节省Prompt重复传输"
         )
-        self.audit_mode_combo.setStyleSheet("""
-            QComboBox {
-                font-size: 15px;
-                padding: 8px;
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3498db;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-                font-size: 15px;
-            }
-        """)
-        settings_layout.addWidget(self.audit_mode_combo, 1, 1)
+        self.audit_mode_combo.setMinimumWidth(320)
+        mode_row.addWidget(mode_label)
+        mode_row.addWidget(self.audit_mode_combo)
+        mode_row.addStretch()
+        settings_layout.addLayout(mode_row)
 
-        # 并发数设置（仅并发模式有效）
-        concurrent_label = QLabel("并发数:")
-        concurrent_label.setStyleSheet("font-size: 15px;")
-        settings_layout.addWidget(concurrent_label, 2, 0)
-
-        concurrent_layout = QHBoxLayout()
-        self.concurrent_spin = QSpinBox()
+        # 并发数设置
+        concurrent_row = QHBoxLayout()
+        concurrent_label = BodyLabel("并发数:")
+        concurrent_label.setFixedWidth(80)
+        self.concurrent_spin = SpinBox()
         self.concurrent_spin.setRange(1, 10)
         self.concurrent_spin.setValue(5)
-        self.concurrent_spin.setStyleSheet("font-size: 15px; padding: 5px;")
-        concurrent_layout.addWidget(self.concurrent_spin)
-
-        concurrent_hint = QLabel("(并发请求模式有效)")
-        concurrent_hint.setStyleSheet("color: #7f8c8d; font-size: 13px;")
-        concurrent_layout.addWidget(concurrent_hint)
-        concurrent_layout.addStretch()
-        settings_layout.addLayout(concurrent_layout, 2, 1)
+        concurrent_row.addWidget(concurrent_label)
+        concurrent_row.addWidget(self.concurrent_spin)
+        concurrent_hint = CaptionLabel("(并发请求模式有效)")
+        concurrent_row.addWidget(concurrent_hint)
+        concurrent_row.addStretch()
+        settings_layout.addLayout(concurrent_row)
 
         # 压缩预设选择
-        compression_label = QLabel("图片压缩:")
-        compression_label.setStyleSheet("font-size: 15px;")
-        settings_layout.addWidget(compression_label, 3, 0)
-
-        self.compression_combo = QComboBox()
+        compression_row = QHBoxLayout()
+        compression_label = BodyLabel("图片压缩:")
+        compression_label.setFixedWidth(80)
+        self.compression_combo = ComboBox()
         self.compression_combo.addItems([
             "均衡（推荐，1920px/500KB/75%）",
             "高质量（2560px/1MB/90%）",
@@ -536,40 +353,23 @@ class AuditPage(QWidget):
             "高压缩：最小传输量，适合网速较慢或大量图片\n"
             "不压缩：保留原图，消耗更多Token"
         )
-        self.compression_combo.setStyleSheet("""
-            QComboBox {
-                font-size: 15px;
-                padding: 8px;
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3498db;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-                font-size: 15px;
-            }
-        """)
-        settings_layout.addWidget(self.compression_combo, 3, 1)
+        self.compression_combo.setMinimumWidth(320)
+        compression_row.addWidget(compression_label)
+        compression_row.addWidget(self.compression_combo)
+        compression_row.addStretch()
+        settings_layout.addLayout(compression_row)
 
-        layout.addWidget(settings_group)
+        layout.addWidget(settings_card)
 
-        # 图片上传区域
-        upload_group = QGroupBox("图片上传")
-        upload_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-        """)
-        upload_layout = QVBoxLayout(upload_group)
+        # 图片上传卡片
+        upload_card = CardWidget()
+        upload_card.setBorderRadius(8)
+        upload_layout = QVBoxLayout(upload_card)
+        upload_layout.setContentsMargins(20, 20, 20, 20)
+        upload_layout.setSpacing(12)
+
+        upload_title = StrongBodyLabel("图片上传")
+        upload_layout.addWidget(upload_title)
 
         # 多图选择
         self.multi_image_drop = ImageDropArea(multi_select=True, max_images=100)
@@ -577,99 +377,75 @@ class AuditPage(QWidget):
         upload_layout.addWidget(self.multi_image_drop)
 
         # 文件计数
-        self.file_count_label = QLabel("已选择 0 张图片")
-        self.file_count_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        self.file_count_label = CaptionLabel("已选择 0 张图片")
         upload_layout.addWidget(self.file_count_label)
 
-        layout.addWidget(upload_group)
+        layout.addWidget(upload_card)
 
         # 操作按钮
         btn_layout = QHBoxLayout()
-        self.batch_audit_btn = QPushButton("开始批量审核")
+        self.batch_audit_btn = PrimaryPushButton("开始批量审核")
         self.batch_audit_btn.clicked.connect(self._on_batch_audit)
         self.batch_audit_btn.setEnabled(False)
-        self.batch_audit_btn.setMinimumHeight(50)
-        self.batch_audit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #219a52;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
-        btn_layout.addStretch()
+        self.batch_audit_btn.setMinimumHeight(45)
         btn_layout.addWidget(self.batch_audit_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
         # 进度显示
-        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar = ProgressBar()
         self.batch_progress_bar.setVisible(False)
         layout.addWidget(self.batch_progress_bar)
 
-        self.batch_status_label = QLabel("")
-        self.batch_status_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+        self.batch_status_label = CaptionLabel("")
         layout.addWidget(self.batch_status_label)
 
-        # 批量结果预览（简化版）
-        self.batch_result_group = QGroupBox("审核结果")
-        self.batch_result_group.setVisible(False)
-        self.batch_result_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-        """)
-        batch_result_layout = QVBoxLayout(self.batch_result_group)
+        # 批量结果卡片
+        self.batch_result_card = CardWidget()
+        self.batch_result_card.setVisible(False)
+        self.batch_result_card.setBorderRadius(8)
+        batch_result_layout = QVBoxLayout(self.batch_result_card)
+        batch_result_layout.setContentsMargins(20, 20, 20, 20)
+        batch_result_layout.setSpacing(12)
 
-        self.batch_summary_label = QLabel("")
-        self.batch_summary_label.setStyleSheet("font-size: 15px;")
+        batch_result_title = StrongBodyLabel("审核结果")
+        batch_result_layout.addWidget(batch_result_title)
+
+        self.batch_summary_label = BodyLabel("")
         batch_result_layout.addWidget(self.batch_summary_label)
 
-        self.batch_result_list = QTextEdit()
+        self.batch_result_list = TextEdit()
         self.batch_result_list.setReadOnly(True)
         self.batch_result_list.setMaximumHeight(200)
-        self.batch_result_list.setStyleSheet("font-size: 14px;")
         batch_result_layout.addWidget(self.batch_result_list)
 
         # 提示信息
-        batch_hint_label = QLabel("💡 提示：上方显示的是简化版结果，查看完整报告请点击导出JSON或Markdown")
-        batch_hint_label.setStyleSheet("color: #7f8c8d; font-size: 12px; padding: 5px;")
-        batch_hint_label.setWordWrap(True)
-        batch_result_layout.addWidget(batch_hint_label)
+        batch_hint = CaptionLabel("上方显示简化结果，完整报告请点击导出")
+        batch_result_layout.addWidget(batch_hint)
 
         # 批量导出按钮
         batch_export_layout = QHBoxLayout()
-        self.batch_export_json_btn = QPushButton("导出JSON")
-        self.batch_export_json_btn.setStyleSheet("font-size: 15px;")
+        self.batch_export_json_btn = PushButton("导出JSON")
         self.batch_export_json_btn.clicked.connect(lambda: self._on_batch_export("json"))
-        self.batch_export_md_btn = QPushButton("导出Markdown")
-        self.batch_export_md_btn.setStyleSheet("font-size: 15px;")
+        self.batch_export_md_btn = PushButton("导出Markdown")
         self.batch_export_md_btn.clicked.connect(lambda: self._on_batch_export("md"))
         batch_export_layout.addStretch()
         batch_export_layout.addWidget(self.batch_export_json_btn)
         batch_export_layout.addWidget(self.batch_export_md_btn)
         batch_result_layout.addLayout(batch_export_layout)
 
-        layout.addWidget(self.batch_result_group)
-
+        layout.addWidget(self.batch_result_card)
         layout.addStretch()
 
-        # 将内容添加到滚动区域
         batch_scroll.setWidget(scroll_content)
 
         # 主布局
         main_layout = QVBoxLayout(widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(batch_scroll)
+
+        # 加载品牌列表
+        self._load_batch_brand_list()
 
         return widget
 
@@ -765,7 +541,13 @@ class AuditPage(QWidget):
         # 发送任务失败信号
         self.task_finished.emit(False, f"审核失败: {error}")
 
-        QMessageBox.critical(self, "错误", f"审核失败:\n{error}")
+        InfoBar.error(
+            title="错误",
+            content=f"审核失败:\n{error}",
+            position=InfoBarPosition.TOP,
+            duration=5000,
+            parent=self
+        )
 
     def _display_result(self, report):
         """显示审核结果"""
@@ -784,7 +566,7 @@ class AuditPage(QWidget):
             background-color: {color};
             color: white;
             padding: 8px 16px;
-            border-radius: 15px;
+            border-radius: 12px;
             font-weight: bold;
         """)
 
@@ -797,7 +579,7 @@ class AuditPage(QWidget):
 
         # 摘要
         if report.summary:
-            self.summary_label.setText(f"📝 总体评价: {report.summary}")
+            self.summary_label.setText(f"总体评价: {report.summary}")
             self.summary_label.setVisible(True)
         else:
             self.summary_label.setVisible(False)
@@ -808,12 +590,12 @@ class AuditPage(QWidget):
 
         # 颜色检测
         if detection.colors:
-            colors_text = " ".join([f"<span style='background-color:{c.hex};color:white;padding:2px 6px;border-radius:3px;'>{c.hex}</span> {c.name} ({c.percent:.1f}%)" for c in detection.colors[:5]])
-            detection_parts.append(f"<b>颜色:</b> {colors_text}")
+            colors_text = " ".join([f"{c.hex} {c.name} ({c.percent:.1f}%)" for c in detection.colors[:5]])
+            detection_parts.append(f"颜色: {colors_text}")
 
         # Logo检测
         if detection.logo:
-            logo_text = f"<b>Logo:</b> {'已检测到' if detection.logo.found else '未检测到'}"
+            logo_text = f"Logo: {'已检测到' if detection.logo.found else '未检测到'}"
             if detection.logo.found:
                 logo_text += f" | 位置: {detection.logo.position or '未知'} | 尺寸: {detection.logo.size_percent or 0:.1f}%"
             detection_parts.append(logo_text)
@@ -823,16 +605,16 @@ class AuditPage(QWidget):
             texts_preview = "、".join(detection.texts[:5])
             if len(detection.texts) > 5:
                 texts_preview += f" 等{len(detection.texts)}条"
-            detection_parts.append(f"<b>文字:</b> {texts_preview}")
+            detection_parts.append(f"文字: {texts_preview}")
 
         # 字体检测
         if detection.fonts:
             fonts_text = "、".join([f.font_family for f in detection.fonts[:3] if f.font_family])
             if fonts_text:
-                detection_parts.append(f"<b>字体:</b> {fonts_text}")
+                detection_parts.append(f"字体: {fonts_text}")
 
         if detection_parts:
-            self.detection_content.setText("<br>".join(detection_parts))
+            self.detection_content.setText("\n".join(detection_parts))
             self.detection_content.setVisible(True)
             self.detection_title.setVisible(True)
         else:
@@ -936,7 +718,13 @@ class AuditPage(QWidget):
             if file_path:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(self.audit_result.to_json())
-                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+                InfoBar.success(
+                    title="成功",
+                    content=f"已导出到:\n{file_path}",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
 
         else:  # markdown
             file_path, _ = QFileDialog.getSaveFileName(
@@ -948,11 +736,17 @@ class AuditPage(QWidget):
                 md_content = self._report_to_markdown(self.audit_result)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(md_content)
-                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+                InfoBar.success(
+                    title="成功",
+                    content=f"已导出到:\n{file_path}",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
 
     def _report_to_markdown(self, report) -> str:
         """将报告转换为Markdown - 完整版"""
-        status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过"}
+        status_map = {"pass": "通过", "warning": "需修改", "fail": "不通过"}
 
         lines = [
             "# 品牌合规审核报告",
@@ -986,10 +780,10 @@ class AuditPage(QWidget):
             if detection.logo.size_percent:
                 lines.append(f"- **尺寸占比**: {detection.logo.size_percent:.1f}%")
             if detection.logo.position_correct is not None:
-                pos_status = "✅ 正确" if detection.logo.position_correct else "❌ 错误"
+                pos_status = "正确" if detection.logo.position_correct else "错误"
                 lines.append(f"- **位置正确**: {pos_status}")
             if detection.logo.color_correct is not None:
-                color_status = "✅ 正确" if detection.logo.color_correct else "❌ 错误"
+                color_status = "正确" if detection.logo.color_correct else "错误"
                 lines.append(f"- **颜色正确**: {color_status}")
         else:
             lines.append("- **检测到Logo**: 否")
@@ -1020,7 +814,7 @@ class AuditPage(QWidget):
             lines.append("### 字体检测")
             lines.append("")
             for f in detection.fonts:
-                status = "🚫 禁用" if f.is_forbidden else "✅ 正常"
+                status = "禁用" if f.is_forbidden else "正常"
                 lines.append(f"- **{f.text}**: {f.font_family} ({status})")
             lines.append("")
 
@@ -1037,14 +831,14 @@ class AuditPage(QWidget):
                 "style_checks": "风格检查"
             }
 
-            status_icons = {"pass": "✅", "warn": "⚠️", "fail": "❌"}
+            status_icons = {"pass": "", "warn": "", "fail": ""}
 
             for check_type, items in report.checks.items():
                 if items:
                     lines.append(f"### {check_titles.get(check_type, check_type)}")
                     lines.append("")
                     for item in items:
-                        icon = status_icons.get(item.status, "❓")
+                        icon = status_icons.get(item.status, "?")
                         lines.append(f"- {icon} **{item.code}** {item.name}: {item.detail}")
                     lines.append("")
 
@@ -1059,30 +853,30 @@ class AuditPage(QWidget):
             minor = [i for i in report.issues if i.severity.value == "minor"]
 
             if critical:
-                lines.append("### 🔴 严重问题")
+                lines.append("### 严重问题")
                 lines.append("")
                 for issue in critical:
                     lines.append(f"- {issue.description}")
                     if issue.suggestion:
-                        lines.append(f"  - 💡 建议: {issue.suggestion}")
+                        lines.append(f"  - 建议: {issue.suggestion}")
                 lines.append("")
 
             if major:
-                lines.append("### 🟡 主要问题")
+                lines.append("### 主要问题")
                 lines.append("")
                 for issue in major:
                     lines.append(f"- {issue.description}")
                     if issue.suggestion:
-                        lines.append(f"  - 💡 建议: {issue.suggestion}")
+                        lines.append(f"  - 建议: {issue.suggestion}")
                 lines.append("")
 
             if minor:
-                lines.append("### 🟢 次要问题")
+                lines.append("### 次要问题")
                 lines.append("")
                 for issue in minor:
                     lines.append(f"- {issue.description}")
                     if issue.suggestion:
-                        lines.append(f"  - 💡 建议: {issue.suggestion}")
+                        lines.append(f"  - 建议: {issue.suggestion}")
                 lines.append("")
 
         return "\n".join(lines)
@@ -1120,7 +914,7 @@ class AuditPage(QWidget):
 
         self.batch_status_label.setText(f"正在审核（{mode_text}模式）...")
         self.batch_audit_btn.setEnabled(False)
-        self.batch_result_group.setVisible(True)  # 提前显示结果区域
+        self.batch_result_card.setVisible(True)  # 提前显示结果区域
         self.batch_result_list.clear()  # 清空之前的结果
 
         # 连接流式结果信号
@@ -1135,7 +929,7 @@ class AuditPage(QWidget):
 
     def _on_streaming_result(self, result: dict, index: int, completed: int, total: int):
         """处理流式结果 - 实时更新UI"""
-        status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(result.get("status"), "❓")
+        status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(result.get("status"), "?")
         line = f"{status_icon} {result.get('file_name')} - 分数: {result.get('score', 'N/A')}"
 
         # 追加到结果列表
@@ -1266,7 +1060,13 @@ class AuditPage(QWidget):
         # 发送任务失败信号
         self.task_finished.emit(False, f"批量审核失败: {error}")
 
-        QMessageBox.critical(self, "错误", f"批量审核失败:\n{error}")
+        InfoBar.error(
+            title="错误",
+            content=f"批量审核失败:\n{error}",
+            position=InfoBarPosition.TOP,
+            duration=5000,
+            parent=self
+        )
 
     def _save_batch_to_history(self, results: list):
         """保存批量审核结果到历史"""
@@ -1345,7 +1145,13 @@ class AuditPage(QWidget):
                         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "results": self._last_batch_results
                     }, f, ensure_ascii=False, indent=2)
-                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+                InfoBar.success(
+                    title="成功",
+                    content=f"已导出到:\n{file_path}",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
         elif format_type == "md":
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "导出批量Markdown报告",
@@ -1356,7 +1162,13 @@ class AuditPage(QWidget):
                 md_content = self._generate_batch_markdown()
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(md_content)
-                QMessageBox.information(self, "成功", f"已导出到:\n{file_path}")
+                InfoBar.success(
+                    title="成功",
+                    content=f"已导出到:\n{file_path}",
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
 
     def _generate_batch_markdown(self) -> str:
         """生成批量报告Markdown内容"""
@@ -1367,7 +1179,7 @@ class AuditPage(QWidget):
         ]
 
         for i, result in enumerate(self._last_batch_results, 1):
-            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "🔴"}.get(result.get("status"), "❓")
+            status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(result.get("status"), "?")
             lines.append(f"## {i}. {result.get('file_name', '未知文件')}")
             lines.append(f"\n**状态:** {status_icon} {result.get('status', '-')}")
             lines.append(f"**评分:** {result.get('score', 'N/A')}/100\n")
@@ -1400,21 +1212,21 @@ class AuditPage(QWidget):
                 if critical or major or minor:
                     lines.append("### 问题列表\n")
                     if critical:
-                        lines.append("#### 🔴 严重问题")
+                        lines.append("#### 严重问题")
                         for issue in critical:
                             lines.append(f"- {issue.get('description', '')}")
                             if issue.get("suggestion"):
                                 lines.append(f"  - 建议: {issue['suggestion']}")
                         lines.append("")
                     if major:
-                        lines.append("#### 🟠 主要问题")
+                        lines.append("#### 主要问题")
                         for issue in major:
                             lines.append(f"- {issue.get('description', '')}")
                             if issue.get("suggestion"):
                                 lines.append(f"  - 建议: {issue['suggestion']}")
                         lines.append("")
                     if minor:
-                        lines.append("#### 🟢 次要问题")
+                        lines.append("#### 次要问题")
                         for issue in minor:
                             lines.append(f"- {issue.get('description', '')}")
                             if issue.get("suggestion"):

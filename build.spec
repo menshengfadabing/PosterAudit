@@ -21,6 +21,10 @@ a = Analysis(
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
+        # Fluent Widgets
+        'qfluentwidgets',
+        'qframelesswindow',
+        'pysidesix_frameless_window',
         # LLM
         'langchain_openai',
         'langchain_core',

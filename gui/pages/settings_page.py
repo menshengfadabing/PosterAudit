@@ -1,13 +1,18 @@
-"""设置页面 - 配置API和品牌规范"""
+"""设置页面 - 配置API和品牌规范（Fluent风格）"""
 
 import json
 from pathlib import Path
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QGroupBox, QFileDialog, QMessageBox, QTextEdit, QComboBox, QTabWidget,
-    QScrollArea, QFrame, QGridLayout, QInputDialog, QSizePolicy, QSplitter
-)
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFileDialog, QInputDialog, QLineEdit
+
+from qfluentwidgets import (
+    ScrollArea, SettingCardGroup,
+    SettingCard, PushSettingCard, ComboBoxSettingCard,
+    LineEdit, PasswordLineEdit, PushButton, PrimaryPushButton,
+    ComboBox, TextEdit, StrongBodyLabel, CaptionLabel,
+    InfoBar, InfoBarPosition, MessageBox, CardWidget,
+    HeaderCardWidget, FluentIcon as FIF
+)
 
 from src.utils.config import settings, get_app_dir
 from src.services.llm_service import llm_service
@@ -16,8 +21,8 @@ from src.services.document_parser import document_parser
 from gui.utils.worker import Worker
 
 
-class SettingsPage(QWidget):
-    """设置页面"""
+class SettingsPage(ScrollArea):
+    """设置页面 - Fluent风格"""
 
     # 进度信号
     progress_updated = Signal(int, str, str)
@@ -26,315 +31,183 @@ class SettingsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("settingsPage")
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         self._init_ui()
         self._load_settings()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(20)
+        # 主容器
+        self.view = QWidget()
+        self.setWidget(self.view)
+
+        layout = QVBoxLayout(self.view)
+        layout.setContentsMargins(36, 20, 36, 20)
+        layout.setSpacing(28)
 
         # 标题
-        title = QLabel("系统设置")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title = StrongBodyLabel("系统设置")
+        title.setStyleSheet("font-size: 24px;")
         layout.addWidget(title)
 
-        # 标签页
-        tab_widget = QTabWidget()
-        tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                background-color: white;
-                font-size: 15px;
-            }
-            QTabBar::tab {
-                padding: 12px 30px;
-                margin-right: 2px;
-                background-color: #ecf0f1;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-size: 15px;
-            }
-            QTabBar::tab:selected {
-                background-color: white;
-                font-weight: bold;
-            }
-        """)
+        # 规则解析模型配置组
+        self._create_rules_model_group(layout)
 
-        # API配置标签
-        api_tab = self._create_api_tab()
-        tab_widget.addTab(api_tab, "API配置")
+        # 海报分析模型配置组
+        self._create_audit_model_group(layout)
 
-        # 规范管理标签
-        rules_tab = self._create_rules_tab()
-        tab_widget.addTab(rules_tab, "规范管理")
-
-        layout.addWidget(tab_widget)
-
-    def _create_api_tab(self) -> QWidget:
-        """创建API配置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(25)
-
-        # 规则解析模型配置组（DeepSeek - 纯文本）
-        rules_model_group = QGroupBox("规则解析模型 (纯文本)")
-        rules_model_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        rules_layout = QGridLayout(rules_model_group)
-        rules_layout.setSpacing(15)
-
-        # DeepSeek API Key
-        deepseek_key_label = QLabel("API Key:")
-        deepseek_key_label.setStyleSheet("font-size: 14px;")
-        rules_layout.addWidget(deepseek_key_label, 0, 0)
-        self.deepseek_key_edit = QLineEdit()
-        self.deepseek_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.deepseek_key_edit.setPlaceholderText("DeepSeek API密钥...")
-        self.deepseek_key_edit.setMinimumWidth(450)
-        rules_layout.addWidget(self.deepseek_key_edit, 0, 1)
-
-        # DeepSeek API Base
-        deepseek_base_label = QLabel("API 地址:")
-        deepseek_base_label.setStyleSheet("font-size: 14px;")
-        rules_layout.addWidget(deepseek_base_label, 1, 0)
-        self.deepseek_base_edit = QLineEdit()
-        rules_layout.addWidget(self.deepseek_base_edit, 1, 1)
-
-        # DeepSeek Model
-        deepseek_model_label = QLabel("模型名称:")
-        deepseek_model_label.setStyleSheet("font-size: 14px;")
-        rules_layout.addWidget(deepseek_model_label, 2, 0)
-        self.deepseek_model_edit = QLineEdit()
-        rules_layout.addWidget(self.deepseek_model_edit, 2, 1)
-
-        layout.addWidget(rules_model_group)
-
-        # 海报分析模型配置组（Doubao - 多模态）
-        audit_model_group = QGroupBox("海报分析模型 (多模态)")
-        audit_model_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: bold;
-                padding-top: 15px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        audit_layout = QGridLayout(audit_model_group)
-        audit_layout.setSpacing(15)
-
-        # Doubao API Key
-        doubao_key_label = QLabel("API Key:")
-        doubao_key_label.setStyleSheet("font-size: 14px;")
-        audit_layout.addWidget(doubao_key_label, 0, 0)
-        self.doubao_key_edit = QLineEdit()
-        self.doubao_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.doubao_key_edit.setPlaceholderText("Doubao API密钥...")
-        self.doubao_key_edit.setMinimumWidth(450)
-        audit_layout.addWidget(self.doubao_key_edit, 0, 1)
-
-        # Doubao API Base
-        doubao_base_label = QLabel("API 地址:")
-        doubao_base_label.setStyleSheet("font-size: 14px;")
-        audit_layout.addWidget(doubao_base_label, 1, 0)
-        self.doubao_base_edit = QLineEdit()
-        audit_layout.addWidget(self.doubao_base_edit, 1, 1)
-
-        # Doubao Model
-        doubao_model_label = QLabel("模型名称:")
-        doubao_model_label.setStyleSheet("font-size: 14px;")
-        audit_layout.addWidget(doubao_model_label, 2, 0)
-        self.doubao_model_edit = QLineEdit()
-        audit_layout.addWidget(self.doubao_model_edit, 2, 1)
-
-        layout.addWidget(audit_model_group)
-
-        # 保存按钮
-        save_api_btn = QPushButton("保存配置")
-        save_api_btn.setMinimumWidth(150)
-        save_api_btn.clicked.connect(self._save_api_config)
-        save_api_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 12px 40px;
-                border: none;
-                border-radius: 5px;
-                font-size: 15px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        layout.addWidget(save_api_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        # 规范管理组
+        self._create_rules_management_group(layout)
 
         layout.addStretch()
 
-        return widget
+    def _create_rules_model_group(self, parent_layout: QVBoxLayout):
+        """创建规则解析模型配置组"""
+        group = HeaderCardWidget("规则解析模型 (纯文本)", self.view)
 
-    def _create_rules_tab(self) -> QWidget:
-        """创建规范管理标签页"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 使用QSplitter实现可调整大小的面板
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #ddd;
-                width: 3px;
-            }
-        """)
+        # API Key
+        key_layout = QHBoxLayout()
+        key_label = StrongBodyLabel("API Key:")
+        key_label.setFixedWidth(100)
+        self.deepseek_key_edit = PasswordLineEdit()
+        self.deepseek_key_edit.setPlaceholderText("DeepSeek API密钥...")
+        self.deepseek_key_edit.setClearButtonEnabled(True)
+        key_layout.addWidget(key_label)
+        key_layout.addWidget(self.deepseek_key_edit)
+        content_layout.addLayout(key_layout)
 
-        # 左侧：规范列表
-        left_panel = QFrame()
-        left_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        left_panel.setMinimumWidth(350)
+        # API Base
+        base_layout = QHBoxLayout()
+        base_label = StrongBodyLabel("API 地址:")
+        base_label.setFixedWidth(100)
+        self.deepseek_base_edit = LineEdit()
+        self.deepseek_base_edit.setClearButtonEnabled(True)
+        base_layout.addWidget(base_label)
+        base_layout.addWidget(self.deepseek_base_edit)
+        content_layout.addLayout(base_layout)
 
-        # 创建滚动区域包裹左侧内容
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Model
+        model_layout = QHBoxLayout()
+        model_label = StrongBodyLabel("模型名称:")
+        model_label.setFixedWidth(100)
+        self.deepseek_model_edit = LineEdit()
+        self.deepseek_model_edit.setClearButtonEnabled(True)
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.deepseek_model_edit)
+        content_layout.addLayout(model_layout)
 
-        left_content = QWidget()
-        left_layout = QVBoxLayout(left_content)
-        left_layout.setContentsMargins(15, 15, 15, 15)
-        left_layout.setSpacing(15)
+        group.viewLayout.addLayout(content_layout)
+        parent_layout.addWidget(group)
 
-        list_title = QLabel("已导入的规范")
-        list_title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
-        left_layout.addWidget(list_title)
+    def _create_audit_model_group(self, parent_layout: QVBoxLayout):
+        """创建海报分析模型配置组"""
+        group = HeaderCardWidget("海报分析模型 (多模态)", self.view)
 
-        # 规范选择下拉
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
+        # API Key
+        key_layout = QHBoxLayout()
+        key_label = StrongBodyLabel("API Key:")
+        key_label.setFixedWidth(100)
+        self.doubao_key_edit = PasswordLineEdit()
+        self.doubao_key_edit.setPlaceholderText("Doubao API密钥...")
+        self.doubao_key_edit.setClearButtonEnabled(True)
+        key_layout.addWidget(key_label)
+        key_layout.addWidget(self.doubao_key_edit)
+        content_layout.addLayout(key_layout)
+
+        # API Base
+        base_layout = QHBoxLayout()
+        base_label = StrongBodyLabel("API 地址:")
+        base_label.setFixedWidth(100)
+        self.doubao_base_edit = LineEdit()
+        self.doubao_base_edit.setClearButtonEnabled(True)
+        base_layout.addWidget(base_label)
+        base_layout.addWidget(self.doubao_base_edit)
+        content_layout.addLayout(base_layout)
+
+        # Model
+        model_layout = QHBoxLayout()
+        model_label = StrongBodyLabel("模型名称:")
+        model_label.setFixedWidth(100)
+        self.doubao_model_edit = LineEdit()
+        self.doubao_model_edit.setClearButtonEnabled(True)
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.doubao_model_edit)
+        content_layout.addLayout(model_layout)
+
+        group.viewLayout.addLayout(content_layout)
+        parent_layout.addWidget(group)
+
+        # 保存按钮
+        btn_layout = QHBoxLayout()
+        save_btn = PrimaryPushButton("保存配置")
+        save_btn.setMinimumWidth(150)
+        save_btn.clicked.connect(self._save_api_config)
+        btn_layout.addWidget(save_btn)
+        btn_layout.addStretch()
+        parent_layout.addLayout(btn_layout)
+
+    def _create_rules_management_group(self, parent_layout: QVBoxLayout):
+        """创建规范管理组"""
+        group = HeaderCardWidget("品牌规范管理", self.view)
+
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 当前规范选择
         select_layout = QHBoxLayout()
-        select_label = QLabel("当前规范:")
-        select_label.setStyleSheet("font-size: 15px;")
+        select_label = StrongBodyLabel("当前规范:")
+        select_label.setFixedWidth(100)
+        self.rules_combo = ComboBox()
+        self.rules_combo.setMinimumWidth(350)
         select_layout.addWidget(select_label)
-        self.rules_combo = QComboBox()
-        self.rules_combo.setMinimumWidth(300)
-        self.rules_combo.setStyleSheet("""
-            QComboBox {
-                font-size: 15px;
-                padding: 8px;
-                background-color: white;
-                color: #2c3e50;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3498db;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 30px;
-            }
-            QComboBox::down-arrow {
-                width: 12px;
-                height: 12px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: white;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                selection-color: white;
-                font-size: 15px;
-            }
-        """)
         select_layout.addWidget(self.rules_combo)
-        left_layout.addLayout(select_layout)
+        select_layout.addStretch()
+        content_layout.addLayout(select_layout)
 
-        # 删除按钮
-        btn_row = QHBoxLayout()
-        delete_btn = QPushButton("删除当前规范")
-        delete_btn.setStyleSheet("background-color: #e74c3c; color: white; font-size: 15px; padding: 8px 16px;")
+        # 操作按钮行
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        delete_btn = PushButton("删除当前规范")
         delete_btn.clicked.connect(self._delete_rules)
-        btn_row.addWidget(delete_btn)
-        btn_row.addStretch()
-        left_layout.addLayout(btn_row)
+        btn_layout.addWidget(delete_btn)
 
-        # 上传按钮
-        upload_row = QHBoxLayout()
-        self.upload_btn = QPushButton("上传规范文档 (PDF/PPT/Word/Excel/MD/TXT)")
-        self.upload_btn.setMinimumHeight(50)
+        self.upload_btn = PrimaryPushButton("上传规范文档 (PDF/PPT/Word/Excel/MD/TXT)")
         self.upload_btn.clicked.connect(self._upload_document)
-        self.upload_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                font-size: 15px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #219a52;
-            }
-        """)
-        upload_row.addWidget(self.upload_btn)
-        left_layout.addLayout(upload_row)
+        btn_layout.addWidget(self.upload_btn)
+        btn_layout.addStretch()
 
-        left_layout.addStretch()
+        content_layout.addLayout(btn_layout)
 
-        # 将左侧内容添加到滚动区域
-        left_scroll.setWidget(left_content)
-        splitter.addWidget(left_scroll)
+        # 规范详情预览
+        preview_label = StrongBodyLabel("规范详情预览:")
+        content_layout.addWidget(preview_label)
 
-        # 右侧：规范详情
-        right_panel = QFrame()
-        right_panel.setStyleSheet("QFrame { background-color: white; border-radius: 8px; }")
-        right_panel.setMinimumWidth(400)
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(15, 15, 15, 15)
-
-        detail_title = QLabel("规范详情")
-        detail_title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
-        right_layout.addWidget(detail_title)
-
-        # 规范预览
-        self.rules_preview = QTextEdit()
+        self.rules_preview = TextEdit()
         self.rules_preview.setReadOnly(True)
         self.rules_preview.setPlaceholderText("选择品牌规范后显示详情...")
-        self.rules_preview.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 14px;
-                line-height: 1.6;
-            }
-        """)
-        right_layout.addWidget(self.rules_preview)
+        self.rules_preview.setMinimumHeight(300)
+        content_layout.addWidget(self.rules_preview)
 
-        splitter.addWidget(right_panel)
-
-        # 设置初始比例
-        splitter.setSizes([350, 600])
-
-        layout.addWidget(splitter)
+        group.viewLayout.addLayout(content_layout)
+        parent_layout.addWidget(group)
 
         # 连接信号
         self.rules_combo.currentIndexChanged.connect(self._on_rules_changed)
 
         # 加载规范列表
         self._load_rules_list()
-
-        return widget
 
     def _load_settings(self):
         """加载设置"""
@@ -361,11 +234,23 @@ class SettingsPage(QWidget):
         doubao_model = self.doubao_model_edit.text().strip()
 
         if not deepseek_key:
-            QMessageBox.warning(self, "警告", "请输入规则解析模型的 API Key")
+            InfoBar.warning(
+                title="警告",
+                content="请输入规则解析模型的 API Key",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
 
         if not doubao_key:
-            QMessageBox.warning(self, "警告", "请输入海报分析模型的 API Key")
+            InfoBar.warning(
+                title="警告",
+                content="请输入海报分析模型的 API Key",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
 
         # 更新配置
@@ -392,7 +277,13 @@ class SettingsPage(QWidget):
             f.write(f"OPENAI_API_BASE={doubao_base}\n")
             f.write(f"DOUBAO_MODEL={doubao_model}\n")
 
-        QMessageBox.information(self, "成功", "API配置已保存")
+        InfoBar.success(
+            title="成功",
+            content="API配置已保存",
+            position=InfoBarPosition.TOP,
+            duration=2000,
+            parent=self
+        )
 
     def _load_rules_list(self):
         """加载规范列表"""
@@ -402,10 +293,10 @@ class SettingsPage(QWidget):
         for rule in rules_list:
             brand_id = rule.get("brand_id", "")
             brand_name = rule.get("brand_name", "未命名")
-            self.rules_combo.addItem(f"{brand_name} ({brand_id})", brand_id)
+            self.rules_combo.addItem(f"{brand_name} ({brand_id})", userData=brand_id)
 
         if self.rules_combo.count() == 0:
-            self.rules_combo.addItem("暂无规范", "")
+            self.rules_combo.addItem("暂无规范", userData="")
 
         self._on_rules_changed()
 
@@ -563,9 +454,12 @@ class SettingsPage(QWidget):
         # 发送任务完成信号
         self.task_finished.emit(True, f"规范文档解析完成: {rules.brand_name}")
 
-        QMessageBox.information(
-            self, "成功",
-            f"规范文档已解析并保存\n品牌: {rules.brand_name}\nID: {brand_id}"
+        InfoBar.success(
+            title="成功",
+            content=f"规范文档已解析并保存\n品牌: {rules.brand_name}\nID: {brand_id}",
+            position=InfoBarPosition.TOP,
+            duration=3000,
+            parent=self
         )
 
         self._load_rules_list()
@@ -578,22 +472,42 @@ class SettingsPage(QWidget):
         # 发送任务失败信号
         self.task_finished.emit(False, f"解析失败: {error_msg}")
 
-        QMessageBox.critical(self, "错误", f"解析失败: {error_msg}")
+        InfoBar.error(
+            title="错误",
+            content=f"解析失败: {error_msg}",
+            position=InfoBarPosition.TOP,
+            duration=5000,
+            parent=self
+        )
 
     def _delete_rules(self):
         """删除规范"""
         brand_id = self.rules_combo.currentData()
         if not brand_id:
-            QMessageBox.warning(self, "警告", "请选择要删除的规范")
+            InfoBar.warning(
+                title="警告",
+                content="请选择要删除的规范",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             return
 
-        reply = QMessageBox.question(
-            self, "确认删除",
+        box = MessageBox(
+            "确认删除",
             f"确定要删除规范 '{self.rules_combo.currentText()}' 吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            self
         )
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if box.exec():
             rules_context.delete_rules(brand_id)
             self._load_rules_list()
-            QMessageBox.information(self, "成功", "规范已删除")
+            InfoBar.success(
+                title="成功",
+                content="规范已删除",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
