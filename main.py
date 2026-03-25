@@ -43,6 +43,10 @@ def main():
         # 开发环境
         app_dir = Path(__file__).parent
 
+    # 确保数据目录存在
+    from src.utils.config import ensure_data_dirs
+    ensure_data_dirs()
+
     # 导入Qt相关模块
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import Qt
