@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QFileDialog, QMessageBox, QTextEdit, QComboBox, QTabWidget,
     QScrollArea, QFrame, QGridLayout, QInputDialog, QSizePolicy, QSplitter
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from src.utils.config import settings, get_app_dir
 from src.services.llm_service import llm_service
@@ -18,6 +18,11 @@ from gui.utils.worker import Worker
 
 class SettingsPage(QWidget):
     """设置页面"""
+
+    # 进度信号
+    progress_updated = Signal(int, str, str)
+    task_started = Signal(str)
+    task_finished = Signal(bool, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -547,16 +552,28 @@ class SettingsPage(QWidget):
         # 如果用户输入为空，使用默认名称
         brand_name = brand_name.strip() if brand_name.strip() else default_name
 
+        # 发送任务开始信号
+        self.task_started.emit("规范文档解析")
+        self.progress_updated.emit(-1, "正在读取文档...", f"开始解析: {Path(file_path).name}")
+
         # 禁用按钮，显示处理中
         self.upload_btn.setEnabled(False)
         self.upload_btn.setText("解析中...")
         self._current_brand_name = brand_name  # 保存品牌名称
 
         # 后台线程解析
-        self._parse_worker = Worker(document_parser.parse_file, file_path, brand_name)
+        self._parse_worker = Worker(self._parse_with_progress, file_path, brand_name)
         self._parse_worker.finished_signal.connect(self._on_parse_finished)
         self._parse_worker.error_signal.connect(self._on_parse_error)
+        self._parse_worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(p, m, m))
         self._parse_worker.start()
+
+    def _parse_with_progress(self, file_path: str, brand_name: str, progress_callback=None):
+        """带进度回调的文档解析"""
+        self.progress_updated.emit(20, "正在提取文档内容...", "")
+        result = document_parser.parse_file(file_path, brand_name)
+        self.progress_updated.emit(80, "正在解析规范结构...", "")
+        return result
 
     def _on_parse_finished(self, rules):
         """解析完成"""
@@ -570,6 +587,9 @@ class SettingsPage(QWidget):
         # 保存
         brand_id = rules_context.add_rules(rules)
 
+        # 发送任务完成信号
+        self.task_finished.emit(True, f"规范文档解析完成: {rules.brand_name}")
+
         QMessageBox.information(
             self, "成功",
             f"规范文档已解析并保存\n品牌: {rules.brand_name}\nID: {brand_id}"
@@ -581,6 +601,10 @@ class SettingsPage(QWidget):
         """解析失败"""
         self.upload_btn.setEnabled(True)
         self.upload_btn.setText("上传规范文档 (PDF/PPT/Word/Excel/MD/TXT)")
+
+        # 发送任务失败信号
+        self.task_finished.emit(False, f"解析失败: {error_msg}")
+
         QMessageBox.critical(self, "错误", f"解析失败: {error_msg}")
 
     def _new_rules(self):

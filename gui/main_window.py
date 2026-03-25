@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont
 
 from gui.pages import SettingsPage, AuditPage, HistoryPage
+from gui.widgets import ProgressPanel
 
 
 class MainWindow(QMainWindow):
@@ -29,17 +30,28 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # 内容区域（侧边栏 + 页面）
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
         # 侧边栏
         sidebar = self._create_sidebar()
-        main_layout.addWidget(sidebar)
+        content_layout.addWidget(sidebar)
 
         # 内容区
         content_area = self._create_content_area()
-        main_layout.addWidget(content_area, 1)
+        content_layout.addWidget(content_area, 1)
+
+        main_layout.addLayout(content_layout, 1)
+
+        # 进度面板
+        self.progress_panel = ProgressPanel()
+        main_layout.addWidget(self.progress_panel)
 
         # 状态栏
         self.status_bar = QStatusBar()
@@ -192,6 +204,35 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         """连接信号"""
         self.nav_list.currentRowChanged.connect(self._on_nav_changed)
+
+        # 连接审核页面的进度信号
+        audit_page = self.pages['audit']
+        audit_page.task_started.connect(self._on_task_started)
+        audit_page.progress_updated.connect(self._on_progress_updated)
+        audit_page.task_finished.connect(self._on_task_finished)
+
+        # 连接设置页面的进度信号
+        settings_page = self.pages['settings']
+        settings_page.task_started.connect(self._on_task_started)
+        settings_page.progress_updated.connect(self._on_progress_updated)
+        settings_page.task_finished.connect(self._on_task_finished)
+
+    def _on_task_started(self, task_name: str):
+        """任务开始"""
+        self.progress_panel.start_task(task_name)
+
+    def _on_progress_updated(self, percent: int, message: str, log_message: str):
+        """进度更新"""
+        if percent < 0:
+            self.progress_panel.set_indeterminate(message)
+        else:
+            self.progress_panel.update_progress(percent, message)
+        if log_message:
+            self.progress_panel.log(log_message)
+
+    def _on_task_finished(self, success: bool, message: str):
+        """任务完成"""
+        self.progress_panel.finish_task(success, message)
 
     def _on_nav_changed(self, row: int):
         """导航项改变"""
