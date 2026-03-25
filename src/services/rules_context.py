@@ -159,127 +159,68 @@ class RulesContextManager:
         return False
 
     def get_rules_text(self, brand_id: Optional[str] = None) -> str:
-        """获取规范的文本描述"""
+        """获取规范的文本描述（精简格式，节省token）"""
         rules = self.get_rules(brand_id)
         if rules is None:
             return "未找到品牌规范，请先上传规范文档。"
 
-        text_parts = []
+        lines = []
+        lines.append(f"品牌：{rules.brand_name}")
 
-        text_parts.append(f"# 品牌名称：{rules.brand_name}")
-        if rules.source:
-            text_parts.append(f"规范来源：{rules.source}")
-        text_parts.append("")
-
-        # 色彩规范
+        # 色彩规范 - 只保留具体数据
         if rules.color:
-            text_parts.append("## 一、色彩规范")
-            text_parts.append("")
-
+            color_parts = []
             if rules.color.primary:
-                text_parts.append("### 1. 主色（品牌标准色）")
-                text_parts.append(f"- 颜色名称：{rules.color.primary.name}")
-                text_parts.append(f"- 色值：{rules.color.primary.value}")
-                text_parts.append("")
-
+                color_parts.append(f"主色:{rules.color.primary.value}({rules.color.primary.name})")
             if rules.color.secondary:
-                text_parts.append("### 2. 辅助色/允许色")
-                for c in rules.color.secondary:
-                    text_parts.append(f"- {c.name}：{c.value}")
-                text_parts.append("")
-
+                secondary = ",".join(f"{c.value}({c.name})" for c in rules.color.secondary)
+                color_parts.append(f"辅助色:{secondary}")
             if rules.color.forbidden:
-                text_parts.append("### 3. 禁用色")
-                for c in rules.color.forbidden:
-                    text_parts.append(f"- {c.name or '非规范色'}：{c.reason or '禁止使用'}")
-                text_parts.append("")
+                forbidden = ",".join(f"{c.value}" for c in rules.color.forbidden)
+                color_parts.append(f"禁用色:{forbidden}")
+            if color_parts:
+                lines.append("色彩：" + " | ".join(color_parts))
 
-        # Logo规范
+        # Logo规范 - 只保留具体参数
         if rules.logo:
-            text_parts.append("## 二、Logo标志规范")
-            text_parts.append("")
-
-            text_parts.append("### L01 Logo结构完整性")
-            text_parts.append("- Logo不得被拉伸、压缩、变形、拆改或改变组合关系")
-            text_parts.append("")
-
-            text_parts.append("### L04 Logo位置规范")
+            logo_parts = []
             if rules.logo.position_description:
-                text_parts.append(f"- 品牌标识应位于{rules.logo.position_description}")
-            else:
-                text_parts.append("- 品牌标识应位于画面左上角")
-            text_parts.append("")
-
-            text_parts.append("### L05 Logo最小显示比例")
+                logo_parts.append(f"位置:{rules.logo.position_description}")
             if rules.logo.size_range:
                 min_size = rules.logo.size_range.get("min", 5)
-                text_parts.append(f"- Logo高度不得低于画面高度的{min_size}%")
-            text_parts.append("")
-
-            text_parts.append("### L06 Logo安全区规范")
-            text_parts.append(f"- Logo周围应保留安全区")
+                max_size = rules.logo.size_range.get("max", 15)
+                logo_parts.append(f"尺寸:{min_size}%-{max_size}%")
             if rules.logo.safe_margin_px:
-                text_parts.append(f"- 安全间距至少{rules.logo.safe_margin_px}px")
-            text_parts.append("")
+                logo_parts.append(f"安全边距:{rules.logo.safe_margin_px}px")
+            if logo_parts:
+                lines.append("Logo：" + " | ".join(logo_parts))
 
-        # 字体规范
+        # 字体规范 - 只保留字体列表
         if rules.font:
-            text_parts.append("## 三、字体规范")
-            text_parts.append("")
-
-            text_parts.append("### F01 字体数量控制")
-            text_parts.append("- 单个版面的字体数量应控制在3种以内")
-            text_parts.append("")
-
-            text_parts.append("### F02 字体风格合规性")
+            font_parts = []
             if rules.font.allowed:
-                text_parts.append(f"- 推荐字体：{'、'.join(rules.font.allowed)}")
+                font_parts.append(f"推荐:{','.join(rules.font.allowed)}")
             if rules.font.forbidden:
-                text_parts.append(f"- 禁用字体：{'、'.join(rules.font.forbidden)}")
-            text_parts.append("")
+                font_parts.append(f"禁用:{','.join(rules.font.forbidden)}")
+            if font_parts:
+                lines.append("字体：" + " | ".join(font_parts))
 
-        # 文案规范
-        if rules.copywriting and (rules.copywriting.forbidden_words or rules.copywriting.required_content):
-            text_parts.append("## 四、文案规范")
-            text_parts.append("")
-
-            if rules.copywriting.forbidden_words:
-                text_parts.append("### 禁用词")
-                words_by_category: dict[str, list[str]] = {}
-                for item in rules.copywriting.forbidden_words:
-                    cat = item.category or "其他"
-                    words_by_category.setdefault(cat, []).append(item.word)
-                for cat, words in words_by_category.items():
-                    text_parts.append(f"- {cat}：{'、'.join(words)}")
-                text_parts.append("")
+        # 文案规范 - 只保留禁用词
+        if rules.copywriting and rules.copywriting.forbidden_words:
+            words = ",".join(w.word for w in rules.copywriting.forbidden_words)
+            lines.append(f"禁用词：{words}")
 
         # 布局规范
         if rules.layout:
-            text_parts.append("## 五、排版布局规范")
-            text_parts.append("")
-
-            text_parts.append("### T01 文本与主体关系")
-            text_parts.append("- 文字应优先放置于图片空白区域")
-            text_parts.append("- 文字不得压在主体焦点区域")
-            text_parts.append("")
-
-            text_parts.append("### T02 版面聚焦与信息层级")
-            text_parts.append("- 版面应具备明确的视觉中心")
-            text_parts.append("- 应具备清晰的主标题、次级信息、正文层级关系")
-            text_parts.append("")
-
+            layout_parts = []
+            if rules.layout.margin_min:
+                layout_parts.append(f"最小边距:{rules.layout.margin_min}px")
             if rules.layout.description:
-                text_parts.append("### 其他布局要求")
-                text_parts.append(rules.layout.description)
-                text_parts.append("")
+                layout_parts.append(rules.layout.description)
+            if layout_parts:
+                lines.append("布局：" + " | ".join(layout_parts))
 
-        # 风格倾向
-        text_parts.append("## 六、风格倾向校准")
-        text_parts.append("")
-        text_parts.append("所有审核均服从统一审美价值导向：阳光、健康、专业、生态")
-        text_parts.append("")
-
-        return "\n".join(text_parts)
+        return "\n".join(lines)
 
     def list_rules(self) -> list[dict[str, Any]]:
         """列出所有品牌规范"""
