@@ -293,8 +293,8 @@ class DocumentParser:
         logger.info(f"使用LLM提取品牌规范: {filename}")
 
         # 检查API配置
-        if not settings.openai_api_key:
-            logger.warning("未配置API Key，无法进行LLM提取")
+        if not settings.deepseek_api_key:
+            logger.warning("未配置DeepSeek API Key，无法进行LLM提取")
             return BrandRules(
                 brand_id="",
                 brand_name="",
@@ -364,13 +364,13 @@ class DocumentParser:
 请输出JSON格式的规则："""
 
         try:
-            # 检查配置
-            logger.info(f"API配置: base={settings.openai_api_base}, model={settings.doubao_model}")
+            # 使用 DeepSeek 纯文本模型进行规则解析
+            logger.info(f"DeepSeek API配置: base={settings.deepseek_api_base}, model={settings.deepseek_model}")
 
             llm = ChatOpenAI(
-                model=settings.doubao_model,
-                openai_api_base=settings.openai_api_base,
-                openai_api_key=settings.openai_api_key,
+                model=settings.deepseek_model,
+                base_url=settings.deepseek_api_base,
+                api_key=settings.deepseek_api_key,
                 temperature=0.1,
                 timeout=120,  # 增加超时时间
             )

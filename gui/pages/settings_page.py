@@ -73,9 +73,9 @@ class SettingsPage(QWidget):
         layout = QVBoxLayout(widget)
         layout.setSpacing(25)
 
-        # API配置组
-        api_group = QGroupBox("API 配置")
-        api_group.setStyleSheet("""
+        # 规则解析模型配置组（DeepSeek - 纯文本）
+        rules_model_group = QGroupBox("规则解析模型 (纯文本)")
+        rules_model_group.setStyleSheet("""
             QGroupBox {
                 font-size: 16px;
                 font-weight: bold;
@@ -87,33 +87,77 @@ class SettingsPage(QWidget):
                 padding: 0 5px;
             }
         """)
-        api_layout = QGridLayout(api_group)
-        api_layout.setSpacing(20)
+        rules_layout = QGridLayout(rules_model_group)
+        rules_layout.setSpacing(15)
 
-        # API Key
-        api_key_label = QLabel("API Key:")
-        api_key_label.setStyleSheet("font-size: 15px;")
-        api_layout.addWidget(api_key_label, 0, 0)
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key_edit.setPlaceholderText("输入API密钥...")
-        self.api_key_edit.setMinimumWidth(500)
-        api_layout.addWidget(self.api_key_edit, 0, 1)
+        # DeepSeek API Key
+        deepseek_key_label = QLabel("API Key:")
+        deepseek_key_label.setStyleSheet("font-size: 14px;")
+        rules_layout.addWidget(deepseek_key_label, 0, 0)
+        self.deepseek_key_edit = QLineEdit()
+        self.deepseek_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.deepseek_key_edit.setPlaceholderText("DeepSeek API密钥...")
+        self.deepseek_key_edit.setMinimumWidth(450)
+        rules_layout.addWidget(self.deepseek_key_edit, 0, 1)
 
-        # API Base
-        api_base_label = QLabel("API 地址:")
-        api_base_label.setStyleSheet("font-size: 15px;")
-        api_layout.addWidget(api_base_label, 1, 0)
-        self.api_base_edit = QLineEdit()
-        self.api_base_edit.setMinimumWidth(500)
-        api_layout.addWidget(self.api_base_edit, 1, 1)
+        # DeepSeek API Base
+        deepseek_base_label = QLabel("API 地址:")
+        deepseek_base_label.setStyleSheet("font-size: 14px;")
+        rules_layout.addWidget(deepseek_base_label, 1, 0)
+        self.deepseek_base_edit = QLineEdit()
+        rules_layout.addWidget(self.deepseek_base_edit, 1, 1)
 
-        # Model
-        model_label = QLabel("模型名称:")
-        model_label.setStyleSheet("font-size: 15px;")
-        api_layout.addWidget(model_label, 2, 0)
-        self.model_edit = QLineEdit()
-        api_layout.addWidget(self.model_edit, 2, 1)
+        # DeepSeek Model
+        deepseek_model_label = QLabel("模型名称:")
+        deepseek_model_label.setStyleSheet("font-size: 14px;")
+        rules_layout.addWidget(deepseek_model_label, 2, 0)
+        self.deepseek_model_edit = QLineEdit()
+        rules_layout.addWidget(self.deepseek_model_edit, 2, 1)
+
+        layout.addWidget(rules_model_group)
+
+        # 海报分析模型配置组（Doubao - 多模态）
+        audit_model_group = QGroupBox("海报分析模型 (多模态)")
+        audit_model_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        audit_layout = QGridLayout(audit_model_group)
+        audit_layout.setSpacing(15)
+
+        # Doubao API Key
+        doubao_key_label = QLabel("API Key:")
+        doubao_key_label.setStyleSheet("font-size: 14px;")
+        audit_layout.addWidget(doubao_key_label, 0, 0)
+        self.doubao_key_edit = QLineEdit()
+        self.doubao_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.doubao_key_edit.setPlaceholderText("Doubao API密钥...")
+        self.doubao_key_edit.setMinimumWidth(450)
+        audit_layout.addWidget(self.doubao_key_edit, 0, 1)
+
+        # Doubao API Base
+        doubao_base_label = QLabel("API 地址:")
+        doubao_base_label.setStyleSheet("font-size: 14px;")
+        audit_layout.addWidget(doubao_base_label, 1, 0)
+        self.doubao_base_edit = QLineEdit()
+        audit_layout.addWidget(self.doubao_base_edit, 1, 1)
+
+        # Doubao Model
+        doubao_model_label = QLabel("模型名称:")
+        doubao_model_label.setStyleSheet("font-size: 14px;")
+        audit_layout.addWidget(doubao_model_label, 2, 0)
+        self.doubao_model_edit = QLineEdit()
+        audit_layout.addWidget(self.doubao_model_edit, 2, 1)
+
+        layout.addWidget(audit_model_group)
 
         # 保存按钮
         save_api_btn = QPushButton("保存配置")
@@ -132,9 +176,8 @@ class SettingsPage(QWidget):
                 background-color: #2980b9;
             }
         """)
-        api_layout.addWidget(save_api_btn, 3, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(save_api_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        layout.addWidget(api_group)
         layout.addStretch()
 
         return widget
@@ -307,29 +350,59 @@ class SettingsPage(QWidget):
 
     def _load_settings(self):
         """加载设置"""
-        self.api_key_edit.setText(settings.openai_api_key)
-        self.api_base_edit.setText(settings.openai_api_base)
-        self.model_edit.setText(settings.doubao_model)
+        # 规则解析模型配置
+        self.deepseek_key_edit.setText(settings.deepseek_api_key)
+        self.deepseek_base_edit.setText(settings.deepseek_api_base)
+        self.deepseek_model_edit.setText(settings.deepseek_model)
+
+        # 海报分析模型配置
+        self.doubao_key_edit.setText(settings.openai_api_key)
+        self.doubao_base_edit.setText(settings.openai_api_base)
+        self.doubao_model_edit.setText(settings.doubao_model)
 
     def _save_api_config(self):
         """保存API配置"""
-        api_key = self.api_key_edit.text().strip()
-        api_base = self.api_base_edit.text().strip()
-        model = self.model_edit.text().strip()
+        # 获取规则解析模型配置
+        deepseek_key = self.deepseek_key_edit.text().strip()
+        deepseek_base = self.deepseek_base_edit.text().strip()
+        deepseek_model = self.deepseek_model_edit.text().strip()
 
-        if not api_key:
-            QMessageBox.warning(self, "警告", "请输入API Key")
+        # 获取海报分析模型配置
+        doubao_key = self.doubao_key_edit.text().strip()
+        doubao_base = self.doubao_base_edit.text().strip()
+        doubao_model = self.doubao_model_edit.text().strip()
+
+        if not deepseek_key:
+            QMessageBox.warning(self, "警告", "请输入规则解析模型的 API Key")
+            return
+
+        if not doubao_key:
+            QMessageBox.warning(self, "警告", "请输入海报分析模型的 API Key")
             return
 
         # 更新配置
-        llm_service.set_api_config(api_key, api_base, model)
+        settings.deepseek_api_key = deepseek_key
+        settings.deepseek_api_base = deepseek_base
+        settings.deepseek_model = deepseek_model
+
+        settings.openai_api_key = doubao_key
+        settings.openai_api_base = doubao_base
+        settings.doubao_model = doubao_model
+
+        # 更新 LLM 服务配置
+        llm_service.set_api_config(doubao_key, doubao_base, doubao_model)
 
         # 保存到.env文件
         env_path = get_app_dir() / ".env"
         with open(env_path, "w", encoding="utf-8") as f:
-            f.write(f"OPENAI_API_KEY={api_key}\n")
-            f.write(f"OPENAI_API_BASE={api_base}\n")
-            f.write(f"DOUBAO_MODEL={model}\n")
+            f.write("# 规则解析模型（纯文本）\n")
+            f.write(f"DEEPSEEK_API_BASE={deepseek_base}\n")
+            f.write(f"DEEPSEEK_API_KEY={deepseek_key}\n")
+            f.write(f"DEEPSEEK_MODEL={deepseek_model}\n")
+            f.write("\n# 海报分析模型（多模态）\n")
+            f.write(f"OPENAI_API_KEY={doubao_key}\n")
+            f.write(f"OPENAI_API_BASE={doubao_base}\n")
+            f.write(f"DOUBAO_MODEL={doubao_model}\n")
 
         QMessageBox.information(self, "成功", "API配置已保存")
 
