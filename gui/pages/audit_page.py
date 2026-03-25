@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QComboBox, QCheckBox, QFileDialog, QScrollArea,
     QGridLayout, QSpinBox, QSizePolicy
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
 
 from gui.widgets import ImageDropArea
@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 class AuditPage(QWidget):
     """审核页面"""
+
+    # 进度信号: (percent, message, log_message)
+    # percent: -1 表示不确定进度, 0-100 表示百分比
+    # message: 状态栏显示的消息
+    # log_message: 日志消息（可选）
+    progress_updated = Signal(int, str, str)
+    task_started = Signal(str)  # 任务名称
+    task_finished = Signal(bool, str)  # 成功/失败, 消息
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -700,6 +708,10 @@ class AuditPage(QWidget):
         audit_service.set_compression_preset(compression_preset)
         logger.info(f"单图审核使用压缩预设: {compression_preset}")
 
+        # 发送任务开始信号
+        self.task_started.emit("单图审核")
+        self.progress_updated.emit(-1, "正在预处理图片...", f"开始审核: {Path(image_path).name}")
+
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.status_label.setText("正在审核（可能需要1-2分钟）...")
@@ -709,11 +721,15 @@ class AuditPage(QWidget):
         self.worker = Worker(self._run_audit, image_path, brand_id)
         self.worker.finished_signal.connect(self._on_audit_finished)
         self.worker.error_signal.connect(self._on_audit_error)
+        self.worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(-1, m, m))
         self.worker.start()
 
     def _run_audit(self, image_path: str, brand_id: str, progress_callback=None):
         """执行审核"""
-        return audit_service.audit_file(image_path, brand_id)
+        self.progress_updated.emit(-1, "正在调用AI分析...", "图片预处理完成")
+        result = audit_service.audit_file(image_path, brand_id)
+        self.progress_updated.emit(80, "正在生成报告...", "AI分析完成")
+        return result
 
     def _on_audit_finished(self, report):
         """审核完成"""
@@ -725,6 +741,9 @@ class AuditPage(QWidget):
         self.export_json_btn.setEnabled(True)
         self.export_md_btn.setEnabled(True)
 
+        # 发送任务完成信号
+        self.task_finished.emit(True, f"审核完成，得分: {report.score}")
+
         # 保存到历史
         self._save_to_history(report)
 
@@ -735,6 +754,10 @@ class AuditPage(QWidget):
         self.progress_bar.setVisible(False)
         self.status_label.setText(f"审核失败: {error}")
         self.audit_btn.setEnabled(True)
+
+        # 发送任务失败信号
+        self.task_finished.emit(False, f"审核失败: {error}")
+
         QMessageBox.critical(self, "错误", f"审核失败:\n{error}")
 
     def _display_result(self, report):
@@ -1077,12 +1100,17 @@ class AuditPage(QWidget):
         # 保存设置供_run_batch_audit使用
         self._audit_mode = audit_mode
         self._concurrent_count = concurrent_count
+        self._total_images = len(image_paths)
+
+        # 发送任务开始信号
+        mode_text = "并发请求" if audit_mode == 0 else "合并请求"
+        self.task_started.emit(f"批量审核 ({mode_text}模式)")
+        self.progress_updated.emit(0, f"准备审核 {len(image_paths)} 张图片...", f"开始批量审核，共 {len(image_paths)} 张图片")
 
         self.batch_progress_bar.setVisible(True)
         self.batch_progress_bar.setRange(0, len(image_paths))
         self.batch_progress_bar.setValue(0)
 
-        mode_text = "并发请求" if audit_mode == 0 else "合并请求"
         self.batch_status_label.setText(f"正在审核（{mode_text}模式）...")
         self.batch_audit_btn.setEnabled(False)
         self.batch_result_group.setVisible(False)
@@ -1101,10 +1129,15 @@ class AuditPage(QWidget):
         mode_text = "并发请求" if audit_mode == 0 else "合并请求"
         logger.info(f"开始批量审核（{mode_text}模式），共 {len(image_paths)} 张图片")
 
+        total = len(image_paths)
+
         def progress_cb(completed, total, message):
             """进度回调包装"""
             if progress_callback:
                 progress_callback(completed, message)
+            # 发送进度信号到主窗口
+            percent = int(completed / total * 100) if total > 0 else 0
+            self.progress_updated.emit(percent, message, message)
 
         start_time = time.time()
 
@@ -1152,6 +1185,10 @@ class AuditPage(QWidget):
         """批量审核进度"""
         self.batch_progress_bar.setValue(current)
         self.batch_status_label.setText(message)
+        # 计算百分比并发送信号
+        if hasattr(self, '_total_images') and self._total_images > 0:
+            percent = int(current / self._total_images * 100)
+            self.progress_updated.emit(percent, message, message)
 
     def _on_batch_finished(self, results: list):
         """批量审核完成"""
@@ -1182,6 +1219,9 @@ class AuditPage(QWidget):
         self.batch_result_list.setText("\n".join(result_lines))
         self.batch_status_label.setText("批量审核完成!")
 
+        # 发送任务完成信号
+        self.task_finished.emit(True, f"批量审核完成，共 {total} 张，通过 {pass_count} 张")
+
         # 保存批量结果
         self._last_batch_results = results
 
@@ -1193,6 +1233,10 @@ class AuditPage(QWidget):
         self.batch_progress_bar.setVisible(False)
         self.batch_audit_btn.setEnabled(True)
         self.batch_status_label.setText(f"批量审核失败: {error}")
+
+        # 发送任务失败信号
+        self.task_finished.emit(False, f"批量审核失败: {error}")
+
         QMessageBox.critical(self, "错误", f"批量审核失败:\n{error}")
 
     def _save_batch_to_history(self, results: list):
