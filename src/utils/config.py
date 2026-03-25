@@ -18,6 +18,26 @@ def get_app_dir() -> Path:
         return Path(__file__).parent.parent.parent
 
 
+def ensure_data_dirs():
+    """确保所有必要的数据目录存在"""
+    app_dir = get_app_dir()
+
+    # 创建必要的目录
+    dirs = [
+        app_dir / "data",
+        app_dir / "data" / "rules",
+        app_dir / "data" / "audit_history",
+        app_dir / "data" / "exports",
+        app_dir / "data" / "uploads",
+        app_dir / "config",
+    ]
+
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+
+    return app_dir
+
+
 class Settings(BaseSettings):
     """应用配置"""
 
