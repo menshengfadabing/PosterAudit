@@ -175,6 +175,32 @@ class LayoutRules(BaseModel):
     description: str = Field(default="", description="描述")
 
 
+class SecondaryRule(BaseModel):
+    """次要规范项"""
+    category: str = Field(default="", description="分类：排版、文案、风格、高风险标签等")
+    name: str = Field(default="", description="规则名称")
+    content: str = Field(default="", description="规则内容")
+    priority: int = Field(default=1, description="优先级: 1=重要, 2=一般, 3=参考")
+
+
+class SourceFile(BaseModel):
+    """规范组源文件"""
+    filename: str = Field(..., description="文件名")
+    file_size: int = Field(default=0, description="文件大小(字节)")
+    upload_time: Optional[datetime] = Field(default=None, description="上传时间")
+    status: str = Field(default="pending", description="状态: pending, parsed, merged")
+
+
+class RuleGroup(BaseModel):
+    """规范组"""
+    group_id: str = Field(default="", description="规范组ID")
+    brand_name: str = Field(default="", description="品牌名称")
+    description: Optional[str] = Field(default=None, description="描述")
+    source_files: list[SourceFile] = Field(default_factory=list, description="源文件列表")
+    created_at: Optional[datetime] = Field(default=None, description="创建时间")
+    updated_at: Optional[datetime] = Field(default=None, description="更新时间")
+
+
 class BrandRules(BaseModel):
     """品牌规范"""
     brand_id: str = Field(default="", description="品牌ID")
@@ -182,11 +208,20 @@ class BrandRules(BaseModel):
     version: str = Field(default="1.0", description="版本")
     source: Optional[str] = Field(default=None, description="来源文件")
     upload_time: Optional[datetime] = Field(default=None, description="上传时间")
+
+    # 主要规范（固定结构）
     color: Optional[ColorRules] = Field(default=None, description="色彩规范")
     logo: Optional[LogoRules] = Field(default=None, description="Logo规范")
     font: Optional[FontRules] = Field(default=None, description="字体规范")
+
+    # 次要规范（动态列表）
+    secondary_rules: list[SecondaryRule] = Field(default_factory=list, description="次要规范列表")
+
+    # 兼容旧字段
     copywriting: Optional[CopywritingRules] = Field(default=None, description="文案规范")
     layout: Optional[LayoutRules] = Field(default=None, description="布局规范")
+
+    # 原始文本（备份）
     raw_text: Optional[str] = Field(default=None, description="原始文本")
 
     def to_json(self) -> str:
