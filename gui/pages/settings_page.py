@@ -258,14 +258,14 @@ class SettingsPage(ScrollArea):
         # 后台测试
         from gui.utils.worker import Worker
 
-        def do_test():
-            return llm_service.test_deepseek_connection()
-
-        self._test_worker = Worker(do_test)
-        self._test_worker.finished_signal.connect(
-            lambda result: self._on_deepseek_test_finished(result)
-        )
+        self._test_worker = Worker(self._do_test_deepseek)
+        self._test_worker.finished_signal.connect(self._on_deepseek_test_finished)
+        self._test_worker.error_signal.connect(self._on_deepseek_test_error)
         self._test_worker.start()
+
+    def _do_test_deepseek(self, progress_callback=None):
+        """执行DeepSeek连接测试"""
+        return llm_service.test_deepseek_connection()
 
     def _on_deepseek_test_finished(self, result):
         """DeepSeek测试完成"""
@@ -279,6 +279,13 @@ class SettingsPage(ScrollArea):
         else:
             self.deepseek_status.setStyleSheet("color: red;")
             self.deepseek_status.setText(f"✗ {message}")
+
+    def _on_deepseek_test_error(self, error_msg):
+        """DeepSeek测试出错"""
+        self.deepseek_test_btn.setEnabled(True)
+        self.deepseek_test_btn.setText("测试连接")
+        self.deepseek_status.setStyleSheet("color: red;")
+        self.deepseek_status.setText(f"✗ {error_msg}")
 
     def _test_doubao(self):
         """测试Doubao连接"""
@@ -294,14 +301,14 @@ class SettingsPage(ScrollArea):
         # 后台测试
         from gui.utils.worker import Worker
 
-        def do_test():
-            return llm_service.test_doubao_connection()
-
-        self._test_worker2 = Worker(do_test)
-        self._test_worker2.finished_signal.connect(
-            lambda result: self._on_doubao_test_finished(result)
-        )
+        self._test_worker2 = Worker(self._do_test_doubao)
+        self._test_worker2.finished_signal.connect(self._on_doubao_test_finished)
+        self._test_worker2.error_signal.connect(self._on_doubao_test_error)
         self._test_worker2.start()
+
+    def _do_test_doubao(self, progress_callback=None):
+        """执行Doubao连接测试"""
+        return llm_service.test_doubao_connection()
 
     def _on_doubao_test_finished(self, result):
         """Doubao测试完成"""
@@ -315,3 +322,10 @@ class SettingsPage(ScrollArea):
         else:
             self.doubao_status.setStyleSheet("color: red;")
             self.doubao_status.setText(f"✗ {message}")
+
+    def _on_doubao_test_error(self, error_msg):
+        """Doubao测试出错"""
+        self.doubao_test_btn.setEnabled(True)
+        self.doubao_test_btn.setText("测试连接")
+        self.doubao_status.setStyleSheet("color: red;")
+        self.doubao_status.setText(f"✗ {error_msg}")
