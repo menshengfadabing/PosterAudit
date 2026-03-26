@@ -6,8 +6,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 
 from qfluentwidgets import (
     ScrollArea, StrongBodyLabel, CaptionLabel,
-    LineEdit, PasswordLineEdit, PrimaryPushButton,
-    InfoBar, InfoBarPosition, CardWidget, TitleLabel
+    LineEdit, PasswordLineEdit, PrimaryPushButton, PushButton,
+    InfoBar, InfoBarPosition, CardWidget, TitleLabel, FluentIcon as FIF
 )
 
 from src.utils.config import settings, get_app_dir
@@ -88,6 +88,18 @@ class SettingsPage(ScrollArea):
         model_layout.addWidget(self.deepseek_model_edit)
         rules_layout.addLayout(model_layout)
 
+        # 测试按钮行
+        test_layout = QHBoxLayout()
+        self.deepseek_test_btn = PushButton("测试连接")
+        self.deepseek_test_btn.setIcon(FIF.PLAY)
+        self.deepseek_test_btn.clicked.connect(self._test_deepseek)
+        test_layout.addWidget(self.deepseek_test_btn)
+
+        self.deepseek_status = CaptionLabel("")
+        test_layout.addWidget(self.deepseek_status)
+        test_layout.addStretch()
+        rules_layout.addLayout(test_layout)
+
         layout.addWidget(rules_card)
 
         # 海报分析模型配置卡片
@@ -134,6 +146,18 @@ class SettingsPage(ScrollArea):
         model_layout2.addWidget(model_label2)
         model_layout2.addWidget(self.doubao_model_edit)
         audit_layout.addLayout(model_layout2)
+
+        # 测试按钮行
+        test_layout2 = QHBoxLayout()
+        self.doubao_test_btn = PushButton("测试连接")
+        self.doubao_test_btn.setIcon(FIF.PLAY)
+        self.doubao_test_btn.clicked.connect(self._test_doubao)
+        test_layout2.addWidget(self.doubao_test_btn)
+
+        self.doubao_status = CaptionLabel("")
+        test_layout2.addWidget(self.doubao_status)
+        test_layout2.addStretch()
+        audit_layout.addLayout(test_layout2)
 
         layout.addWidget(audit_card)
 
@@ -219,3 +243,75 @@ class SettingsPage(ScrollArea):
             duration=2000,
             parent=self
         )
+
+    def _test_deepseek(self):
+        """测试DeepSeek连接"""
+        self.deepseek_test_btn.setEnabled(False)
+        self.deepseek_test_btn.setText("测试中...")
+        self.deepseek_status.setText("")
+
+        # 先保存当前配置到settings
+        settings.deepseek_api_key = self.deepseek_key_edit.text().strip()
+        settings.deepseek_api_base = self.deepseek_base_edit.text().strip()
+        settings.deepseek_model = self.deepseek_model_edit.text().strip()
+
+        # 后台测试
+        from gui.utils.worker import Worker
+
+        def do_test():
+            return llm_service.test_deepseek_connection()
+
+        self._test_worker = Worker(do_test)
+        self._test_worker.finished_signal.connect(
+            lambda result: self._on_deepseek_test_finished(result)
+        )
+        self._test_worker.start()
+
+    def _on_deepseek_test_finished(self, result):
+        """DeepSeek测试完成"""
+        success, message = result
+        self.deepseek_test_btn.setEnabled(True)
+        self.deepseek_test_btn.setText("测试连接")
+
+        if success:
+            self.deepseek_status.setStyleSheet("color: green;")
+            self.deepseek_status.setText(f"✓ {message}")
+        else:
+            self.deepseek_status.setStyleSheet("color: red;")
+            self.deepseek_status.setText(f"✗ {message}")
+
+    def _test_doubao(self):
+        """测试Doubao连接"""
+        self.doubao_test_btn.setEnabled(False)
+        self.doubao_test_btn.setText("测试中...")
+        self.doubao_status.setText("")
+
+        # 先保存当前配置到settings
+        settings.openai_api_key = self.doubao_key_edit.text().strip()
+        settings.openai_api_base = self.doubao_base_edit.text().strip()
+        settings.doubao_model = self.doubao_model_edit.text().strip()
+
+        # 后台测试
+        from gui.utils.worker import Worker
+
+        def do_test():
+            return llm_service.test_doubao_connection()
+
+        self._test_worker2 = Worker(do_test)
+        self._test_worker2.finished_signal.connect(
+            lambda result: self._on_doubao_test_finished(result)
+        )
+        self._test_worker2.start()
+
+    def _on_doubao_test_finished(self, result):
+        """Doubao测试完成"""
+        success, message = result
+        self.doubao_test_btn.setEnabled(True)
+        self.doubao_test_btn.setText("测试连接")
+
+        if success:
+            self.doubao_status.setStyleSheet("color: green;")
+            self.doubao_status.setText(f"✓ {message}")
+        else:
+            self.doubao_status.setStyleSheet("color: red;")
+            self.doubao_status.setText(f"✗ {message}")
