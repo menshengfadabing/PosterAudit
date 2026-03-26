@@ -304,7 +304,7 @@ class HistoryPage(ScrollArea):
             self._current_full_report = None
 
     def _render_report_detail(self, data: dict):
-        """渲染报告详情 - 完整版"""
+        """渲染报告详情 - 只显示规则检查清单"""
         lines = []
         grade_map = {'pass': '优', 'warning': '良', 'fail': '差', 'error': '错误'}
 
@@ -324,8 +324,8 @@ class HistoryPage(ScrollArea):
                 lines.append(f"【详细结果 ({len(results)}项)】")
                 lines.append("")
 
-                for i, r in enumerate(results):  # 显示全部结果
-                    status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(r.get("status"), "?")
+                for i, r in enumerate(results):
+                    status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "❌"}.get(r.get("status"), "❌")
                     grade = grade_map.get(r.get("status"), "?")
                     lines.append(f"--- 图片 {i+1}: {r.get('file_name', '-')} ---")
                     lines.append(f"状态: {status_icon} | 评级: {grade}")
@@ -333,182 +333,64 @@ class HistoryPage(ScrollArea):
 
                     report = r.get("report", {})
                     if report:
-                        # 摘要
-                        if report.get("summary"):
-                            lines.append("总体评价:")
-                            lines.append(f"  {report['summary'][:200]}{'...' if len(report.get('summary', '')) > 200 else ''}")
+                        # 规则检查清单
+                        rule_checks = report.get("rule_checks", [])
+                        if rule_checks:
+                            lines.append("【规则检查清单】")
+                            fail_count = len([c for c in rule_checks if c.get("status") == "fail"])
+                            review_count = len([c for c in rule_checks if c.get("status") in ("review", "warn")])
+                            pass_count = len([c for c in rule_checks if c.get("status") == "pass"])
+                            lines.append(f"通过:{pass_count} 不合规:{fail_count} 需复核:{review_count}")
                             lines.append("")
 
-                        # 检测结果
-                        detection = report.get("detection", {})
-                        if detection:
-                            # Logo
-                            logo = detection.get("logo", {})
-                            if logo:
-                                if logo.get("found"):
-                                    pos_ok = "" if logo.get("position_correct") else ""
-                                    lines.append(f"Logo: 已检测 | 位置: {logo.get('position', '-')} ({pos_ok}) | 尺寸: {logo.get('size_percent', 0):.1f}%")
+                            # 按状态排序
+                            status_order = {"fail": 0, "review": 1, "warn": 1, "pass": 2}
+                            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                            for check in sorted_checks:
+                                status = check.get("status", "review")
+                                if status == "pass":
+                                    icon = "✅"
                                 else:
-                                    lines.append("Logo: 未检测到")
-                                lines.append("")
-
-                            # 颜色
-                            colors = detection.get("colors", [])
-                            if colors:
-                                color_strs = [f"{c.get('hex', '')}({c.get('percent', 0):.0f}%)" for c in colors[:5]]
-                                lines.append(f"颜色: {', '.join(color_strs)}")
-                                lines.append("")
-
-                            # 字体
-                            fonts = detection.get("fonts", [])
-                            if fonts:
-                                forbidden = [f for f in fonts if f.get("is_forbidden")]
-                                if forbidden:
-                                    lines.append(f"禁用字体: {', '.join([f.get('text', '')[:15] for f in forbidden[:3]])}")
-                                else:
-                                    lines.append("字体: 无禁用字体")
-                                lines.append("")
-
-                        # 检查项摘要
-                        checks = report.get("checks", {})
-                        if checks:
-                            fail_count = sum(1 for items in checks.values() for item in items if item.get("status") == "fail")
-                            warn_count = sum(1 for items in checks.values() for item in items if item.get("status") == "warn")
-                            pass_count = sum(1 for items in checks.values() for item in items if item.get("status") == "pass")
-                            lines.append(f"检查项: {pass_count} {warn_count} {fail_count}")
+                                    icon = "❌"
+                                result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
+                                result = result_map.get(status, status.upper())
+                                lines.append(f"{icon} {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {result}")
                             lines.append("")
-
-                        # 问题列表
-                        issues = report.get("issues", [])
-                        if issues:
-                            critical = [i for i in issues if i.get("severity") == "critical"]
-                            major = [i for i in issues if i.get("severity") == "major"]
-                            minor = [i for i in issues if i.get("severity") == "minor"]
-                            lines.append(f"问题: 严重{len(critical)} 主要{len(major)} 次要{len(minor)}")
 
                     lines.append("")
 
         elif "report" in data:
             # 单图审核
             report = data.get("report", {})
-            status_icon = {"pass": "", "warning": "", "fail": ""}.get(report.get("status"), "?")
+            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌"}.get(report.get("status"), "❌")
             grade = grade_map.get(report.get("status"), "?")
             lines.append(f"【审核结果】评级: {grade} | 状态: {status_icon}")
             lines.append("")
 
-            # 摘要
-            if report.get("summary"):
-                lines.append("总体评价:")
-                lines.append(report["summary"])
+            # 规则检查清单
+            rule_checks = report.get("rule_checks", [])
+            if rule_checks:
+                lines.append("【规则检查清单】")
+                fail_count = len([c for c in rule_checks if c.get("status") == "fail"])
+                review_count = len([c for c in rule_checks if c.get("status") in ("review", "warn")])
+                pass_count = len([c for c in rule_checks if c.get("status") == "pass"])
+                lines.append(f"通过:{pass_count} 不合规:{fail_count} 需复核:{review_count}")
                 lines.append("")
 
-            # 检测结果
-            detection = report.get("detection", {})
-            if detection:
-                lines.append("【检测结果】")
-                lines.append("")
+                # 按状态排序
+                status_order = {"fail": 0, "review": 1, "warn": 1, "pass": 2}
+                sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
 
-                # Logo
-                logo = detection.get("logo", {})
-                if logo:
-                    if logo.get("found"):
-                        pos_ok = "正确" if logo.get("position_correct") else "错误"
-                        lines.append(f"Logo: 已检测")
-                        lines.append(f"   位置: {logo.get('position', '-')} ({pos_ok})")
-                        if logo.get("size_percent"):
-                            lines.append(f"   尺寸: {logo['size_percent']:.1f}%")
+                for check in sorted_checks:
+                    status = check.get("status", "review")
+                    if status == "pass":
+                        icon = "✅"
                     else:
-                        lines.append("Logo: 未检测到")
-                    lines.append("")
-
-                # 颜色
-                colors = detection.get("colors", [])
-                if colors:
-                    lines.append("主要颜色:")
-                    for c in colors[:6]:
-                        lines.append(f"   {c.get('hex', '')} {c.get('name', '')} - {c.get('percent', 0):.1f}%")
-                    lines.append("")
-
-                # 文字
-                texts = detection.get("texts", [])
-                if texts:
-                    lines.append(f"检测到的文字 ({len(texts)}条):")
-                    for t in texts[:8]:
-                        lines.append(f"   * {t[:50]}{'...' if len(t) > 50 else ''}")
-                    if len(texts) > 8:
-                        lines.append(f"   ... 还有 {len(texts) - 8} 条")
-                    lines.append("")
-
-                # 字体
-                fonts = detection.get("fonts", [])
-                if fonts:
-                    lines.append("字体检测:")
-                    for f in fonts[:5]:
-                        status = "禁用" if f.get("is_forbidden") else "正常"
-                        lines.append(f"   * {f.get('text', '')[:20]}: {f.get('font_family', '-')} ({status})")
-                    lines.append("")
-
-            # 检查项
-            checks = report.get("checks", {})
-            if checks:
-                lines.append("【检查项详情】")
-                lines.append("")
-
-                check_titles = {
-                    "logo_checks": "Logo检查",
-                    "color_checks": "色彩检查",
-                    "font_checks": "字体检查",
-                    "layout_checks": "排版检查",
-                    "style_checks": "风格检查"
-                }
-
-                status_icons = {"pass": "", "warn": "", "fail": ""}
-
-                for check_type, items in checks.items():
-                    if items:
-                        # 统计
-                        fail_cnt = sum(1 for item in items if item.get("status") == "fail")
-                        if fail_cnt > 0:
-                            lines.append(f"{check_titles.get(check_type, check_type)}:")
-                            for item in items:
-                                if item.get("status") == "fail":
-                                    icon = status_icons.get(item.get("status"), "?")
-                                    lines.append(f"   {icon} {item.get('code', '')} {item.get('name', '')}")
-                                    lines.append(f"      {item.get('detail', '')[:80]}")
-                            lines.append("")
-
-            # 问题列表
-            issues = report.get("issues", [])
-            if issues:
-                lines.append(f"【问题列表 ({len(issues)}项)】")
-                lines.append("")
-
-                critical = [i for i in issues if i.get("severity") == "critical"]
-                major = [i for i in issues if i.get("severity") == "major"]
-                minor = [i for i in issues if i.get("severity") == "minor"]
-
-                if critical:
-                    lines.append("严重问题:")
-                    for issue in critical:
-                        lines.append(f"   * {issue.get('description', '')}")
-                        if issue.get("suggestion"):
-                            lines.append(f"     建议: {issue['suggestion'][:60]}")
-                    lines.append("")
-
-                if major:
-                    lines.append("主要问题:")
-                    for issue in major:
-                        lines.append(f"   * {issue.get('description', '')}")
-                        if issue.get("suggestion"):
-                            lines.append(f"     建议: {issue['suggestion'][:60]}")
-                    lines.append("")
-
-                if minor:
-                    lines.append("次要问题:")
-                    for issue in minor[:5]:
-                        lines.append(f"   * {issue.get('description', '')}")
-                    if len(minor) > 5:
-                        lines.append(f"   ... 还有 {len(minor) - 5} 个次要问题")
+                        icon = "❌"
+                    result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
+                    result = result_map.get(status, status.upper())
+                    confidence = check.get("confidence", 0)
+                    lines.append(f"{icon} {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {result} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
 
         self.detail_text.setText("\n".join(lines))
 
@@ -594,136 +476,34 @@ class HistoryPage(ScrollArea):
 
                 report = r.get("report", {})
                 if report:
-                    status_map = {"pass": " 通过", "warning": " 需修改", "fail": " 不通过", "error": " 错误"}
+                    status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过", "error": "❌ 错误"}
                     grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
                     grade = grade_map.get(r.get("status"), "?")
                     lines.append(f"**评级**: {grade}")
                     lines.append(f"**状态**: {status_map.get(r.get('status'), r.get('status', '-'))}")
                     lines.append("")
 
-                    # 摘要
-                    if report.get("summary"):
-                        lines.append("### 总体评价")
-                        lines.append("")
-                        lines.append(report["summary"])
-                        lines.append("")
-
-                    # 检测结果
-                    detection = report.get("detection", {})
-                    if detection:
-                        lines.append("### 检测结果")
+                    # 规则检查清单
+                    rule_checks = report.get("rule_checks", [])
+                    if rule_checks:
+                        lines.append("## 规则检查清单")
                         lines.append("")
 
-                        # Logo
-                        logo = detection.get("logo", {})
-                        if logo:
-                            lines.append("#### Logo检测")
-                            lines.append("")
-                            if logo.get("found"):
-                                lines.append(f"- **检测到Logo**: 是")
-                                lines.append(f"- **位置**: {logo.get('position', '未知')}")
-                                if logo.get("size_percent"):
-                                    lines.append(f"- **尺寸占比**: {logo['size_percent']:.1f}%")
-                                if logo.get("position_correct") is not None:
-                                    pos_status = " 正确" if logo["position_correct"] else " 错误"
-                                    lines.append(f"- **位置正确**: {pos_status}")
+                        # 按状态排序
+                        status_order = {"fail": 0, "review": 1, "pass": 2, "warn": 1}
+                        sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+
+                        for check in sorted_checks:
+                            status = check.get("status", "review")
+                            if status == "pass":
+                                icon = "✅"
                             else:
-                                lines.append("- **检测到Logo**: 否")
-                            lines.append("")
-
-                        # 颜色
-                        colors = detection.get("colors", [])
-                        if colors:
-                            lines.append("#### 颜色检测")
-                            lines.append("")
-                            lines.append("| 颜色值 | 名称 | 占比 |")
-                            lines.append("|--------|------|------|")
-                            for c in colors:
-                                lines.append(f"| {c.get('hex', '')} | {c.get('name', '')} | {c.get('percent', 0):.1f}% |")
-                            lines.append("")
-
-                        # 文字
-                        texts = detection.get("texts", [])
-                        if texts:
-                            lines.append("#### 文字检测 (OCR)")
-                            lines.append("")
-                            for j, text in enumerate(texts[:10], 1):
-                                lines.append(f"{j}. {text}")
-                            if len(texts) > 10:
-                                lines.append(f"_... 共 {len(texts)} 条_")
-                            lines.append("")
-
-                        # 字体
-                        fonts = detection.get("fonts", [])
-                        if fonts:
-                            lines.append("#### 字体检测")
-                            lines.append("")
-                            for f in fonts:
-                                status = " 禁用" if f.get("is_forbidden") else " 正常"
-                                lines.append(f"- **{f.get('text', '')}**: {f.get('font_family', '')} ({status})")
-                            lines.append("")
-
-                    # 检查项
-                    checks = report.get("checks", {})
-                    if checks:
-                        lines.append("### 检查项详情")
+                                icon = "❌"
+                            result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
+                            result = result_map.get(status, status.upper())
+                            confidence = check.get("confidence", 0)
+                            lines.append(f"[{icon}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {result} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
                         lines.append("")
-
-                        check_titles = {
-                            "logo_checks": "Logo检查",
-                            "color_checks": "色彩检查",
-                            "font_checks": "字体检查",
-                            "layout_checks": "排版检查",
-                            "style_checks": "风格检查"
-                        }
-
-                        status_icons = {"pass": "", "warn": "", "fail": ""}
-
-                        for check_type, items in checks.items():
-                            if items:
-                                lines.append(f"#### {check_titles.get(check_type, check_type)}")
-                                lines.append("")
-                                for item in items:
-                                    icon = status_icons.get(item.get("status"), "?")
-                                    lines.append(f"- {icon} **{item.get('code', '')}** {item.get('name', '')}: {item.get('detail', '')}")
-                                lines.append("")
-
-                    # 问题列表
-                    issues = report.get("issues", [])
-                    if issues:
-                        lines.append("### 问题列表")
-                        lines.append("")
-
-                        critical = [i for i in issues if i.get("severity") == "critical"]
-                        major = [i for i in issues if i.get("severity") == "major"]
-                        minor = [i for i in issues if i.get("severity") == "minor"]
-
-                        if critical:
-                            lines.append("#### 严重问题")
-                            lines.append("")
-                            for issue in critical:
-                                lines.append(f"- {issue.get('description', '')}")
-                                if issue.get("suggestion"):
-                                    lines.append(f"  - 建议: {issue['suggestion']}")
-                            lines.append("")
-
-                        if major:
-                            lines.append("#### 主要问题")
-                            lines.append("")
-                            for issue in major:
-                                lines.append(f"- {issue.get('description', '')}")
-                                if issue.get("suggestion"):
-                                    lines.append(f"  - 建议: {issue['suggestion']}")
-                            lines.append("")
-
-                        if minor:
-                            lines.append("#### 次要问题")
-                            lines.append("")
-                            for issue in minor:
-                                lines.append(f"- {issue.get('description', '')}")
-                                if issue.get("suggestion"):
-                                    lines.append(f"  - 建议: {issue['suggestion']}")
-                            lines.append("")
 
                 lines.append("---")
                 lines.append("")
@@ -731,7 +511,7 @@ class HistoryPage(ScrollArea):
         elif "report" in data:
             # 单图报告
             report = data.get("report", {})
-            status_map = {"pass": " 通过", "warning": " 需修改", "fail": " 不通过"}
+            status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过"}
             grade_map = {"pass": "优", "warning": "良", "fail": "差"}
             grade = grade_map.get(report.get("status"), "?")
             lines.extend([
@@ -740,131 +520,27 @@ class HistoryPage(ScrollArea):
                 "",
             ])
 
-            # 摘要
-            if report.get("summary"):
-                lines.extend([
-                    "## 总体评价",
-                    "",
-                    report["summary"],
-                    "",
-                ])
-
-            # 检测结果
-            detection = report.get("detection", {})
-            if detection:
-                lines.append("## 检测结果")
+            # 规则检查清单
+            rule_checks = report.get("rule_checks", [])
+            if rule_checks:
+                lines.append("## 规则检查清单")
                 lines.append("")
 
-                # Logo
-                logo = detection.get("logo", {})
-                if logo:
-                    lines.append("### Logo检测")
-                    lines.append("")
-                    if logo.get("found"):
-                        lines.append(f"- **检测到Logo**: 是")
-                        lines.append(f"- **位置**: {logo.get('position', '未知')}")
-                        if logo.get("size_percent"):
-                            lines.append(f"- **尺寸占比**: {logo['size_percent']:.1f}%")
-                        if logo.get("position_correct") is not None:
-                            pos_status = " 正确" if logo["position_correct"] else " 错误"
-                            lines.append(f"- **位置正确**: {pos_status}")
+                # 按状态排序
+                status_order = {"fail": 0, "review": 1, "pass": 2, "warn": 1}
+                sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+
+                for check in sorted_checks:
+                    status = check.get("status", "review")
+                    if status == "pass":
+                        icon = "✅"
                     else:
-                        lines.append("- **检测到Logo**: 否")
-                    lines.append("")
-
-                # 颜色
-                colors = detection.get("colors", [])
-                if colors:
-                    lines.append("### 颜色检测")
-                    lines.append("")
-                    lines.append("| 颜色值 | 名称 | 占比 |")
-                    lines.append("|--------|------|------|")
-                    for c in colors:
-                        lines.append(f"| {c.get('hex', '')} | {c.get('name', '')} | {c.get('percent', 0):.1f}% |")
-                    lines.append("")
-
-                # 文字
-                texts = detection.get("texts", [])
-                if texts:
-                    lines.append("### 文字检测 (OCR)")
-                    lines.append("")
-                    for j, text in enumerate(texts[:10], 1):
-                        lines.append(f"{j}. {text}")
-                    if len(texts) > 10:
-                        lines.append(f"_... 共 {len(texts)} 条_")
-                    lines.append("")
-
-                # 字体
-                fonts = detection.get("fonts", [])
-                if fonts:
-                    lines.append("### 字体检测")
-                    lines.append("")
-                    for f in fonts:
-                        status = " 禁用" if f.get("is_forbidden") else " 正常"
-                        lines.append(f"- **{f.get('text', '')}**: {f.get('font_family', '')} ({status})")
-                    lines.append("")
-
-            # 检查项
-            checks = report.get("checks", {})
-            if checks:
-                lines.append("## 检查项详情")
+                        icon = "❌"
+                    result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
+                    result = result_map.get(status, status.upper())
+                    confidence = check.get("confidence", 0)
+                    lines.append(f"[{icon}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {result} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
                 lines.append("")
-
-                check_titles = {
-                    "logo_checks": "Logo检查",
-                    "color_checks": "色彩检查",
-                    "font_checks": "字体检查",
-                    "layout_checks": "排版检查",
-                    "style_checks": "风格检查"
-                }
-
-                status_icons = {"pass": "", "warn": "", "fail": ""}
-
-                for check_type, items in checks.items():
-                    if items:
-                        lines.append(f"### {check_titles.get(check_type, check_type)}")
-                        lines.append("")
-                        for item in items:
-                            icon = status_icons.get(item.get("status"), "?")
-                            lines.append(f"- {icon} **{item.get('code', '')}** {item.get('name', '')}: {item.get('detail', '')}")
-                        lines.append("")
-
-            # 问题列表
-            issues = report.get("issues", [])
-            if issues:
-                lines.append("## 问题列表")
-                lines.append("")
-
-                critical = [i for i in issues if i.get("severity") == "critical"]
-                major = [i for i in issues if i.get("severity") == "major"]
-                minor = [i for i in issues if i.get("severity") == "minor"]
-
-                if critical:
-                    lines.append("### 严重问题")
-                    lines.append("")
-                    for issue in critical:
-                        lines.append(f"- {issue.get('description', '')}")
-                        if issue.get("suggestion"):
-                            lines.append(f"  - 建议: {issue['suggestion']}")
-                    lines.append("")
-
-                if major:
-                    lines.append("### 主要问题")
-                    lines.append("")
-                    for issue in major:
-                        lines.append(f"- {issue.get('description', '')}")
-                        if issue.get("suggestion"):
-                            lines.append(f"  - 建议: {issue['suggestion']}")
-                    lines.append("")
-
-                if minor:
-                    lines.append("### 次要问题")
-                    lines.append("")
-                    for issue in minor:
-                        lines.append(f"- {issue.get('description', '')}")
-                        if issue.get("suggestion"):
-                            lines.append(f"  - 建议: {issue['suggestion']}")
-                    lines.append("")
 
         return "\n".join(lines)
 

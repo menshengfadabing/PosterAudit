@@ -97,6 +97,16 @@ class CheckItem(BaseModel):
     detail: str = Field(default="", description="详细说明")
 
 
+class RuleCheckItem(BaseModel):
+    """规则检查项 - 用于规则检查清单"""
+    rule_id: str = Field(..., description="规则ID: Rule_1, Rule_2...")
+    rule_content: str = Field(..., description="规则内容")
+    status: str = Field(default="pass", description="状态: pass/fail/review")
+    reference: str = Field(default="", description="参考文档来源")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="置信度 0-1")
+    detail: str = Field(default="", description="详细说明")
+
+
 class Issue(BaseModel):
     """问题项"""
     type: IssueType = Field(..., description="问题类型")
@@ -113,6 +123,7 @@ class AuditReport(BaseModel):
     status: AuditStatus = Field(..., description="审核状态")
     detection: DetectionResult = Field(default_factory=DetectionResult, description="检测结果")
     checks: dict[str, list[CheckItem]] = Field(default_factory=dict, description="各项检查结果")
+    rule_checks: list[RuleCheckItem] = Field(default_factory=list, description="规则检查清单")
     issues: list[Issue] = Field(default_factory=list, description="问题列表")
     summary: str = Field(default="", description="总体评价")
 

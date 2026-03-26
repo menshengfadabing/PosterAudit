@@ -239,6 +239,122 @@ class RulesContextManager:
 
         return "\n".join(lines)
 
+    def get_rules_checklist(self, brand_id: Optional[str] = None) -> list[dict]:
+        """
+        获取规则检查清单（用于 LLM Prompt）
+
+        Returns:
+            规则列表，每条规则包含:
+            - rule_id: Rule_1, Rule_2...
+            - content: 规则内容
+            - category: 分类名
+            - reference: 参考文档来源
+        """
+        rules = self.get_rules(brand_id)
+        if rules is None:
+            return []
+
+        checklist = []
+        rule_num = 1
+        source_prefix = rules.source or rules.brand_name or "品牌规范"
+
+        def add_rule(content: str, category: str):
+            nonlocal rule_num
+            if content and content.strip():
+                checklist.append({
+                    "rule_id": f"Rule_{rule_num}",
+                    "content": content.strip(),
+                    "category": category,
+                    "reference": f"参考文档-{source_prefix}"
+                })
+                rule_num += 1
+
+        # 1. Logo 规范
+        if rules.logo:
+            logo_category = "Logo规范"
+            # additional_rules
+            for rule in rules.logo.additional_rules:
+                add_rule(rule, logo_category)
+            # color_requirements
+            for rule in rules.logo.color_requirements:
+                add_rule(rule, f"{logo_category}-颜色要求")
+            # background_requirements
+            for rule in rules.logo.background_requirements:
+                add_rule(rule, f"{logo_category}-背景要求")
+            # 基本规则
+            if rules.logo.position_description:
+                add_rule(f"Logo位置应位于{rules.logo.position_description}", logo_category)
+            if rules.logo.size_range:
+                min_size = rules.logo.size_range.get("min", 5)
+                max_size = rules.logo.size_range.get("max", 15)
+                add_rule(f"Logo尺寸应占图片宽度的{min_size}%-{max_size}%", logo_category)
+            if rules.logo.safe_margin_px:
+                add_rule(f"Logo四周应保留至少{rules.logo.safe_margin_px}px安全边距", logo_category)
+            if rules.logo.min_display_ratio:
+                add_rule(rules.logo.min_display_ratio, logo_category)
+
+        # 2. 色彩规范
+        if rules.color:
+            color_category = "色彩规范"
+            # additional_rules
+            for rule in rules.color.additional_rules:
+                add_rule(rule, color_category)
+            # 主色
+            if rules.color.primary:
+                add_rule(f"主色应为{rules.color.primary.value}({rules.color.primary.name})", color_category)
+            # 辅助色
+            if rules.color.secondary:
+                for c in rules.color.secondary:
+                    add_rule(f"辅助色可使用{c.value}({c.name})", color_category)
+            # 禁用色
+            if rules.color.forbidden:
+                for c in rules.color.forbidden:
+                    reason = f"，原因：{c.reason}" if c.reason else ""
+                    add_rule(f"禁止使用颜色{c.value}{reason}", color_category)
+            # 整体描述
+            if rules.color.description:
+                add_rule(rules.color.description, color_category)
+
+        # 3. 字体规范
+        if rules.font:
+            font_category = "字体规范"
+            # additional_rules
+            for rule in rules.font.additional_rules:
+                add_rule(rule, font_category)
+            # 允许字体
+            if rules.font.allowed:
+                add_rule(f"推荐使用字体：{','.join(rules.font.allowed)}", font_category)
+            # 禁用字体
+            if rules.font.forbidden:
+                add_rule(f"禁止使用字体：{','.join(rules.font.forbidden)}", font_category)
+            # 备注
+            if rules.font.note:
+                add_rule(rules.font.note, font_category)
+
+        # 4. 文案规范
+        if rules.copywriting:
+            cw_category = "文案规范"
+            if rules.copywriting.forbidden_words:
+                words = "、".join(w.word for w in rules.copywriting.forbidden_words)
+                add_rule(f"禁止使用词语：{words}", cw_category)
+            if rules.copywriting.required_content:
+                for content in rules.copywriting.required_content:
+                    add_rule(f"文案必须包含：{content}", cw_category)
+
+        # 5. 布局规范
+        if rules.layout:
+            layout_category = "布局规范"
+            if rules.layout.margin_min:
+                add_rule(f"最小边距应为{rules.layout.margin_min}px", layout_category)
+            if rules.layout.description:
+                add_rule(rules.layout.description, layout_category)
+
+        # 6. 次要规范（排版、风格、高风险标签等）
+        for sr in rules.secondary_rules:
+            add_rule(sr.content, sr.category)
+
+        return checklist
+
     def list_rules(self) -> list[dict[str, Any]]:
         """列出所有品牌规范"""
         result = []

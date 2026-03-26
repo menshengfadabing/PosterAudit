@@ -212,18 +212,19 @@ class AuditPage(ScrollArea):
         self.detection_content.setVisible(False)
         right_layout.addWidget(self.detection_content)
 
-        # 问题列表标题
-        self.issues_title = StrongBodyLabel("问题列表")
-        self.issues_title.setVisible(False)
-        right_layout.addWidget(self.issues_title)
+        # 规则检查清单标题
+        self.rule_checks_title = StrongBodyLabel("规则检查清单")
+        self.rule_checks_title.setVisible(False)
+        right_layout.addWidget(self.rule_checks_title)
 
-        # 问题表格
-        self.issues_table = TableWidget()
-        self.issues_table.setColumnCount(4)
-        self.issues_table.setHorizontalHeaderLabels(["类型", "严重程度", "描述", "建议"])
-        self.issues_table.horizontalHeader().setStretchLastSection(True)
-        self.issues_table.setVisible(False)
-        right_layout.addWidget(self.issues_table)
+        # 规则检查清单表格
+        self.rule_checks_table = TableWidget()
+        self.rule_checks_table.setColumnCount(5)
+        self.rule_checks_table.setHorizontalHeaderLabels(["状态", "规则ID", "规则内容", "结果", "置信度"])
+        self.rule_checks_table.horizontalHeader().setStretchLastSection(True)
+        self.rule_checks_table.setMinimumHeight(200)
+        self.rule_checks_table.setVisible(False)
+        right_layout.addWidget(self.rule_checks_table)
 
         right_layout.addStretch()
 
@@ -576,12 +577,12 @@ class AuditPage(ScrollArea):
             font-weight: bold;
         """)
 
-        # 问题数量
-        issues = report.issues
-        critical = len([i for i in issues if i.severity.value == "critical"])
-        major = len([i for i in issues if i.severity.value == "major"])
-        minor = len([i for i in issues if i.severity.value == "minor"])
-        self.issue_count_label.setText(f"问题数: {len(issues)}个 (严重:{critical} 主要:{major} 次要:{minor})")
+        # 问题数量 - 改为规则统计
+        rule_checks = report.rule_checks if hasattr(report, 'rule_checks') else []
+        fail_count = len([r for r in rule_checks if r.status == "fail"])
+        review_count = len([r for r in rule_checks if r.status == "review"])
+        pass_count = len([r for r in rule_checks if r.status == "pass"])
+        self.issue_count_label.setText(f"规则检查: {len(rule_checks)}条 (通过:{pass_count} 不合规:{fail_count} 需复核:{review_count})")
 
         # 摘要
         if report.summary:
@@ -627,37 +628,53 @@ class AuditPage(ScrollArea):
             self.detection_content.setVisible(False)
             self.detection_title.setVisible(False)
 
-        # 问题列表
-        if issues:
-            self.issues_table.setRowCount(len(issues))
-            self.issues_table.setVisible(True)
-            self.issues_title.setVisible(True)
+        # 规则检查清单表格
+        if rule_checks:
+            self.rule_checks_table.setRowCount(len(rule_checks))
+            self.rule_checks_table.setVisible(True)
+            self.rule_checks_title.setVisible(True)
 
-            severity_map = {
-                'critical': '严重',
-                'major': '主要',
-                'minor': '次要'
-            }
+            # 按状态排序: fail > review > pass
+            status_order = {"fail": 0, "review": 1, "pass": 2}
+            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.status, 3))
 
-            severity_colors = {
-                'critical': '#e74c3c',
-                'major': '#f39c12',
-                'minor': '#3498db'
-            }
+            for row, check in enumerate(sorted_checks):
+                # 状态图标
+                if check.status == "pass":
+                    status_icon = "✅"
+                    status_color = "#27ae60"
+                elif check.status == "fail":
+                    status_icon = "❌"
+                    status_color = "#e74c3c"
+                else:  # review
+                    status_icon = "❌"
+                    status_color = "#f39c12"
 
-            for row, issue in enumerate(issues):
-                self.issues_table.setItem(row, 0, QTableWidgetItem(issue.type.value.upper()))
+                status_item = QTableWidgetItem(status_icon)
+                status_item.setForeground(QColor(status_color))
+                self.rule_checks_table.setItem(row, 0, status_item)
 
-                severity_text = severity_map.get(issue.severity.value, issue.severity.value)
-                severity_item = QTableWidgetItem(severity_text)
-                severity_item.setForeground(QColor(severity_colors.get(issue.severity.value, '#95a5a6')))
-                self.issues_table.setItem(row, 1, severity_item)
+                # 规则ID
+                self.rule_checks_table.setItem(row, 1, QTableWidgetItem(check.rule_id))
 
-                self.issues_table.setItem(row, 2, QTableWidgetItem(issue.description))
-                self.issues_table.setItem(row, 3, QTableWidgetItem(issue.suggestion))
+                # 规则内容
+                self.rule_checks_table.setItem(row, 2, QTableWidgetItem(check.rule_content))
+
+                # 结果
+                result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}
+                result_item = QTableWidgetItem(result_map.get(check.status, "REVIEW"))
+                result_item.setForeground(QColor(status_color))
+                self.rule_checks_table.setItem(row, 3, result_item)
+
+                # 置信度
+                confidence_text = f"{check.confidence:.2f}"
+                self.rule_checks_table.setItem(row, 4, QTableWidgetItem(confidence_text))
+
+            # 调整列宽
+            self.rule_checks_table.resizeColumnsToContents()
         else:
-            self.issues_table.setVisible(False)
-            self.issues_title.setVisible(False)
+            self.rule_checks_table.setVisible(False)
+            self.rule_checks_title.setVisible(False)
 
     def _save_to_history(self, report):
         """保存审核结果到历史"""
@@ -751,8 +768,8 @@ class AuditPage(ScrollArea):
                 )
 
     def _report_to_markdown(self, report) -> str:
-        """将报告转换为Markdown - 完整版"""
-        status_map = {"pass": "通过", "warning": "需修改", "fail": "不通过"}
+        """将报告转换为Markdown - 只输出规则检查清单"""
+        status_map = {"pass": "✅ 通过", "warning": "⚠️ 需修改", "fail": "❌ 不通过"}
         grade_map = {"pass": "优", "warning": "良", "fail": "差"}
         grade = grade_map.get(report.status.value, "未知")
 
@@ -764,128 +781,26 @@ class AuditPage(ScrollArea):
             "",
         ]
 
-        # 摘要
-        if report.summary:
-            lines.extend([
-                "## 总体评价",
-                "",
-                report.summary,
-                "",
-            ])
-
-        # 检测结果
-        lines.append("## 检测结果")
-        lines.append("")
-
-        detection = report.detection
-
-        # Logo检测结果
-        lines.append("### Logo检测")
-        lines.append("")
-        if detection.logo.found:
-            lines.append(f"- **检测到Logo**: 是")
-            lines.append(f"- **位置**: {detection.logo.position or '未知'}")
-            if detection.logo.size_percent:
-                lines.append(f"- **尺寸占比**: {detection.logo.size_percent:.1f}%")
-            if detection.logo.position_correct is not None:
-                pos_status = "正确" if detection.logo.position_correct else "错误"
-                lines.append(f"- **位置正确**: {pos_status}")
-            if detection.logo.color_correct is not None:
-                color_status = "正确" if detection.logo.color_correct else "错误"
-                lines.append(f"- **颜色正确**: {color_status}")
-        else:
-            lines.append("- **检测到Logo**: 否")
-        lines.append("")
-
-        # 颜色检测结果
-        if detection.colors:
-            lines.append("### 颜色检测")
-            lines.append("")
-            lines.append("| 颜色值 | 名称 | 占比 |")
-            lines.append("|--------|------|------|")
-            for c in detection.colors:
-                lines.append(f"| {c.hex} | {c.name} | {c.percent:.1f}% |")
+        # 规则检查清单
+        if hasattr(report, 'rule_checks') and report.rule_checks:
+            lines.append("## 规则检查清单")
             lines.append("")
 
-        # 文字检测结果
-        if detection.texts:
-            lines.append("### 文字检测 (OCR)")
-            lines.append("")
-            for i, text in enumerate(detection.texts[:10], 1):
-                lines.append(f"{i}. {text}")
-            if len(detection.texts) > 10:
-                lines.append(f"_... 共 {len(detection.texts)} 条_")
-            lines.append("")
+            # 按状态分组
+            fail_checks = [r for r in report.rule_checks if r.status == "fail"]
+            review_checks = [r for r in report.rule_checks if r.status == "review"]
+            warn_checks = [r for r in report.rule_checks if r.status == "warn"]
+            pass_checks = [r for r in report.rule_checks if r.status == "pass"]
 
-        # 字体检测结果
-        if detection.fonts:
-            lines.append("### 字体检测")
-            lines.append("")
-            for f in detection.fonts:
-                status = "禁用" if f.is_forbidden else "正常"
-                lines.append(f"- **{f.text}**: {f.font_family} ({status})")
-            lines.append("")
-
-        # 检查项详情
-        if report.checks:
-            lines.append("## 检查项详情")
-            lines.append("")
-
-            check_titles = {
-                "logo_checks": "Logo检查",
-                "color_checks": "色彩检查",
-                "font_checks": "字体检查",
-                "layout_checks": "排版检查",
-                "style_checks": "风格检查"
-            }
-
-            status_icons = {"pass": "", "warn": "", "fail": ""}
-
-            for check_type, items in report.checks.items():
-                if items:
-                    lines.append(f"### {check_titles.get(check_type, check_type)}")
-                    lines.append("")
-                    for item in items:
-                        icon = status_icons.get(item.status, "?")
-                        lines.append(f"- {icon} **{item.code}** {item.name}: {item.detail}")
-                    lines.append("")
-
-        # 问题列表
-        if report.issues:
-            lines.append("## 问题列表")
-            lines.append("")
-
-            # 按严重程度分组
-            critical = [i for i in report.issues if i.severity.value == "critical"]
-            major = [i for i in report.issues if i.severity.value == "major"]
-            minor = [i for i in report.issues if i.severity.value == "minor"]
-
-            if critical:
-                lines.append("### 严重问题")
-                lines.append("")
-                for issue in critical:
-                    lines.append(f"- {issue.description}")
-                    if issue.suggestion:
-                        lines.append(f"  - 建议: {issue.suggestion}")
-                lines.append("")
-
-            if major:
-                lines.append("### 主要问题")
-                lines.append("")
-                for issue in major:
-                    lines.append(f"- {issue.description}")
-                    if issue.suggestion:
-                        lines.append(f"  - 建议: {issue.suggestion}")
-                lines.append("")
-
-            if minor:
-                lines.append("### 次要问题")
-                lines.append("")
-                for issue in minor:
-                    lines.append(f"- {issue.description}")
-                    if issue.suggestion:
-                        lines.append(f"  - 建议: {issue.suggestion}")
-                lines.append("")
+            # 格式化输出 - 按优先级排序
+            for check in fail_checks:
+                lines.append(f"[❌] {check.rule_id} : {check.rule_content} -->> FAIL >> {check.reference}，置信度：{check.confidence:.2f}；")
+            for check in review_checks:
+                lines.append(f"[❌] {check.rule_id} : {check.rule_content} -->> REVIEW >> {check.reference}，置信度：{check.confidence:.2f}；")
+            for check in warn_checks:
+                lines.append(f"[❌] {check.rule_id} : {check.rule_content} -->> WARN >> {check.reference}，置信度：{check.confidence:.2f}；")
+            for check in pass_checks:
+                lines.append(f"[✅] {check.rule_id} : {check.rule_content} -->> PASS >> {check.reference}，置信度：{check.confidence:.2f}；")
 
         return "\n".join(lines)
 
@@ -937,11 +852,20 @@ class AuditPage(ScrollArea):
 
     def _on_streaming_result(self, result: dict, index: int, completed: int, total: int):
         """处理流式结果 - 实时更新UI"""
-        status_icons = {"pass": "", "warning": "", "fail": "", "error": ""}
+        status_icons = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "❌"}
         status_icon = status_icons.get(result.get("status"), "?")
         grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
         grade = grade_map.get(result.get("status"), "?")
-        line = f"{status_icon} {result.get('file_name')} - 评级: {grade}"
+
+        # 规则检查统计
+        report = result.get("report", {})
+        rule_checks = report.get("rule_checks", [])
+        if rule_checks:
+            fail_count = len([c for c in rule_checks if c.get("status") == "fail"])
+            review_count = len([c for c in rule_checks if c.get("status") == "review"])
+            line = f"{status_icon} {result.get('file_name')} - 评级: {grade} | 不合规:{fail_count} 需复核:{review_count}"
+        else:
+            line = f"{status_icon} {result.get('file_name')} - 评级: {grade}"
 
         # 追加到结果列表
         current_text = self.batch_result_list.toPlainText()
@@ -1183,7 +1107,7 @@ class AuditPage(ScrollArea):
         ]
 
         for i, result in enumerate(self._last_batch_results, 1):
-            status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(result.get("status"), "?")
+            status_icon = {"pass": "✅", "warning": "⚠️", "fail": "❌", "error": "❌"}.get(result.get("status"), "❌")
             grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
             grade = grade_map.get(result.get("status"), "?")
             lines.append(f"## {i}. {result.get('file_name', '未知文件')}")
@@ -1192,52 +1116,26 @@ class AuditPage(ScrollArea):
 
             report = result.get("report", {})
             if report:
-                if report.get("summary"):
-                    lines.append("### 总体评价\n")
-                    lines.append(report["summary"])
+                # 规则检查清单
+                rule_checks = report.get("rule_checks", [])
+                if rule_checks:
+                    lines.append("### 规则检查清单\n")
+
+                    # 按状态排序
+                    status_order = {"fail": 0, "review": 1, "warn": 1, "pass": 2}
+                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+
+                    for check in sorted_checks:
+                        status = check.get("status", "review")
+                        if status == "pass":
+                            icon = "✅"
+                        else:
+                            icon = "❌"
+                        result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
+                        check_result = result_map.get(status, status.upper())
+                        confidence = check.get("confidence", 0)
+                        lines.append(f"[{icon}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {check_result} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
                     lines.append("")
-
-                # 检测结果
-                detection = report.get("detection", {})
-                if detection:
-                    lines.append("### 检测结果\n")
-                    logo = detection.get("logo", {})
-                    if logo:
-                        lines.append(f"- **Logo:** {'已检测' if logo.get('found') else '未检测到'}")
-                        if logo.get("found"):
-                            lines.append(f"  - 位置: {logo.get('position', '-')}")
-                            lines.append(f"  - 尺寸: {logo.get('size_percent', 0):.1f}%")
-                    lines.append("")
-
-                # 问题列表
-                issues = report.get("issues", {})
-                critical = issues.get("critical", [])
-                major = issues.get("major", [])
-                minor = issues.get("minor", [])
-
-                if critical or major or minor:
-                    lines.append("### 问题列表\n")
-                    if critical:
-                        lines.append("#### 严重问题")
-                        for issue in critical:
-                            lines.append(f"- {issue.get('description', '')}")
-                            if issue.get("suggestion"):
-                                lines.append(f"  - 建议: {issue['suggestion']}")
-                        lines.append("")
-                    if major:
-                        lines.append("#### 主要问题")
-                        for issue in major:
-                            lines.append(f"- {issue.get('description', '')}")
-                            if issue.get("suggestion"):
-                                lines.append(f"  - 建议: {issue['suggestion']}")
-                        lines.append("")
-                    if minor:
-                        lines.append("#### 次要问题")
-                        for issue in minor:
-                            lines.append(f"- {issue.get('description', '')}")
-                            if issue.get("suggestion"):
-                                lines.append(f"  - 建议: {issue['suggestion']}")
-                        lines.append("")
 
             lines.append("---\n")
 
