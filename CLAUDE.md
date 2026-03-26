@@ -16,14 +16,21 @@ uv sync
 # Run application
 uv run python main.py
 
-# Run full flow test (requires test data files)
+# Run core module tests (imports, services, schemas, cache)
+uv run python test/test_core.py
+
+# Run full flow test (document parsing + image audit + report generation)
+# Requires test data in data/uploads/
 uv run python test/test_full_flow.py
 ```
 
-### Build
+### Build & Release
 ```bash
-# Package executable with PyInstaller
+# Package executable locally
 pyinstaller build.spec
+
+# Release: Push a version tag to trigger GitHub Actions cross-platform build
+git tag v1.0.0 && git push --tags
 ```
 
 ## Architecture
@@ -34,8 +41,16 @@ pyinstaller build.spec
 main.py                 # Application entry point, Qt setup, font detection
 ├── gui/                # PySide6 UI layer
 │   ├── main_window.py  # QMainWindow with sidebar navigation
-│   ├── pages/          # SettingsPage, AuditPage, HistoryPage
-│   └── widgets/        # Reusable components (ImageDropArea)
+│   ├── pages/          # Feature pages
+│   │   ├── settings_page.py  # API configuration
+│   │   ├── rules_page.py     # Brand rules management
+│   │   ├── audit_page.py     # Single/batch image audit
+│   │   └── history_page.py   # Audit history browser
+│   ├── widgets/        # Reusable components
+│   │   ├── image_drop_area.py  # Drag-drop image upload
+│   │   └── progress_panel.py   # Batch audit progress
+│   └── utils/
+│       └── worker.py   # QThread background task runner
 │
 └── src/                # Business logic layer
     ├── models/         # Pydantic data models (schemas.py)
@@ -49,7 +64,7 @@ main.py                 # Application entry point, Qt setup, font detection
 All services use global singleton instances: `llm_service`, `audit_service`, `rules_context`, `document_parser`.
 
 - **LLMService** (`src/services/llm_service.py`): LangChain + OpenAI-compatible API. Handles single/batch image audit with token estimation and context window management.
-- **AuditService** (`src/services/audit_service.py`): Image preprocessing (compression, resize), audit orchestration. Two batch modes: concurrent API calls or merged single request.
+- **AuditService** (`src/services/audit_service.py`): Image preprocessing (compression, resize), audit orchestration. Two batch modes: concurrent API calls or merged single request. Compression presets: `high_quality`, `balanced`, `high_compression`, `no_compression`.
 - **DocumentParser** (`src/services/document_parser.py`): Extracts text from PDF (PyMuPDF), PPT (python-pptx), Word (python-docx), Excel (openpyxl/xlrd), Markdown, then uses LLM to parse into structured `BrandRules`.
 - **RulesContextManager** (`src/services/rules_context.py`): Singleton managing brand rules cache and persistence in `data/rules/`.
 
@@ -95,6 +110,7 @@ See `src/models/schemas.py`:
 
 ## GUI Notes
 
-- Uses QThread for background tasks (`gui/utils/worker.py`)
-- Navigation via sidebar QListWidget switching QStackedWidget pages
+- Uses PySide6-Fluent-Widgets (`qfluentwidgets`) for modern Windows-style UI components
+- QThread via `gui/utils/worker.py` for background tasks (document parsing, batch audit)
+- Navigation: sidebar QListWidget switches QStackedWidget pages
 - Chinese font auto-detection in `main.py` for cross-platform support

@@ -308,9 +308,9 @@ class DocumentParser:
 【重要】规则分为两类，不可混淆：
 
 一、【主要规范】- 固定三项，这是品牌识别的核心要素：
-1. color（色彩）：主色、辅助色、禁用色
-2. logo：位置描述、尺寸范围、安全间距
-3. font（字体）：允许字体、禁用字体
+1. color（色彩）：主色、辅助色、禁用色、配色规则
+2. logo：位置描述、尺寸范围、安全间距、颜色要求、背景要求、其他规则
+3. font（字体）：允许字体、禁用字体、字号规则、其他规则
 
 注意：主要规范仅包含以上三项！不要把其他内容放入主要规范！
 
@@ -321,24 +321,58 @@ class DocumentParser:
 - 高风险标签：需要特别避免的问题标签
 - 其他：不属于以上分类的内容
 
-输出JSON格式：
+【输出格式要求】- 动态生成，完整提取：
+
+输出JSON格式，尽可能完整保留文档中的所有规则：
 ```json
 {
   "brand_name": "品牌名称",
   "color": {
     "primary": {"name": "颜色名称", "value": "#XXXXXX"},
-    "secondary": [{"name": "名称", "value": "#XXXXXX"}],
-    "forbidden": [{"name": "名称", "value": "#XXXXXX", "reason": "原因"}]
+    "secondary": [
+      {"name": "名称1", "value": "#XXXXXX"},
+      {"name": "名称2", "value": "#XXXXXX"}
+    ],
+    "forbidden": [
+      {"name": "名称", "value": "#XXXXXX", "reason": "原因"}
+    ],
+    "description": "整体色彩风格描述",
+    "additional_rules": [
+      "配色结构比例建议3:6:1",
+      "色系数量控制在3种以内",
+      "其他色彩相关规则..."
+    ]
   },
   "logo": {
     "position": "top_left 或 top_right 或 center",
     "position_description": "位置描述",
     "size_range": {"min": 5, "max": 15},
-    "safe_margin_px": 20
+    "safe_margin_px": 20,
+    "min_display_ratio": "Logo高度不得低于画面高度的4.2%",
+    "color_requirements": [
+      "Logo必须使用品牌标准色或K100黑色",
+      "不得擅自改色"
+    ],
+    "background_requirements": [
+      "Logo应与背景明度匹配",
+      "深色背景使用反白版本"
+    ],
+    "additional_rules": [
+      "Logo不得被拉伸、压缩、变形",
+      "Logo周围不得被文字或图形侵入",
+      "其他Logo相关规则..."
+    ]
   },
   "font": {
-    "allowed": ["字体1", "字体2"],
-    "forbidden": ["字体3"]
+    "allowed": ["字体1", "字体2", "字体3"],
+    "forbidden": ["字体4", "字体5"],
+    "size_rules": {"heading": "18-24px", "body": "12-14px"},
+    "note": "字体使用备注",
+    "additional_rules": [
+      "单个版面字体数量控制在3种以内",
+      "字体应清晰、规范、易读",
+      "其他字体相关规则..."
+    ]
   },
   "secondary_rules": [
     {"category": "排版", "name": "边距要求", "content": "上下左右边距不小于20px", "priority": 1},
@@ -349,15 +383,17 @@ class DocumentParser:
 ```
 
 严格执行规则：
-1. 颜色值必须是十六进制格式如 #00A4FF
+1. 颜色值必须是十六进制格式如 #00A4FF，如果文档中没有明确色值，根据描述推断或留空
 2. 主要规范(color/logo/font)仅提取这三项核心内容，其他都放入secondary_rules
-3. secondary_rules中不得重复包含色彩、Logo、字体相关内容
-4. priority: 1=重要, 2=一般, 3=参考
-5. 如果文档未提及某项主要规范，该字段设为null
-6. 只输出JSON，不要其他文字"""
+3. 【重要】additional_rules数组用于存储该类别下的所有额外规则，不要遗漏
+4. secondary_rules中不得重复包含色彩、Logo、字体相关内容（已放入主规范的additional_rules中）
+5. priority: 1=重要, 2=一般, 3=参考
+6. 如果文档未提及某项主要规范，该字段设为null
+7. 【重要】尽可能完整提取所有规则，不要遗漏或截断
+8. 只输出JSON，不要其他文字"""
 
-        # 截取文本，保留关键内容
-        max_chars = 12000
+        # 截取文本，保留关键内容（提高上限至60K，适应当前大模型64K+上下文窗口）
+        max_chars = 60000
         if len(text) > max_chars:
             # 尝试保留前面部分和包含关键词的部分
             text_for_llm = text[:max_chars]
@@ -521,6 +557,13 @@ class DocumentParser:
             if forbidden_list:
                 rules.color.forbidden = forbidden_list
 
+        # 解析额外的色彩规则
+        if color_data.get("additional_rules"):
+            rules.color.additional_rules = [r for r in color_data["additional_rules"] if r]
+
+        if color_data.get("description"):
+            rules.color.description = color_data["description"]
+
     def _parse_logo_rules(self, rules: BrandRules, logo_data: dict):
         """解析Logo规则"""
         size_range = logo_data.get("size_range")
@@ -544,6 +587,10 @@ class DocumentParser:
             position_description=logo_data.get("position_description", "") or "",
             size_range=size_range,
             safe_margin_px=int(logo_data.get("safe_margin_px", 20) or 20),
+            additional_rules=[r for r in (logo_data.get("additional_rules") or []) if r],
+            min_display_ratio=logo_data.get("min_display_ratio") or logo_data.get("min_size_ratio"),
+            color_requirements=[r for r in (logo_data.get("color_requirements") or []) if r],
+            background_requirements=[r for r in (logo_data.get("background_requirements") or []) if r],
         )
 
     def _parse_font_rules(self, rules: BrandRules, font_data: dict):
@@ -561,6 +608,8 @@ class DocumentParser:
                 allowed=allowed,
                 forbidden=forbidden,
                 size_rules=size_rules,
+                additional_rules=[r for r in (font_data.get("additional_rules") or []) if r],
+                note=font_data.get("note") or None,
             )
 
     def _parse_copywriting_rules(self, rules: BrandRules, cw_data: dict):
@@ -601,6 +650,104 @@ class DocumentParser:
                     priority=item.get("priority", 1),
                 )
                 rules.secondary_rules.append(rule)
+
+    def extract_text_only(self, file_data: bytes, filename: str) -> str:
+        """仅提取文档文本，不调用LLM解析（用于多文件合并场景）"""
+        ext = Path(filename).suffix.lower()
+
+        if ext not in SUPPORTED_FORMATS:
+            raise ValueError(f"不支持的文档格式: {ext}")
+
+        method_name, _ = SUPPORTED_FORMATS[ext]
+        parse_method = getattr(self, method_name)
+        file_path = Path(filename)
+
+        # 根据文件类型提取文本
+        if ext == ".pdf":
+            doc = fitz.open(stream=file_data, filetype="pdf")
+            text_content = []
+            for page_num, page in enumerate(doc):
+                text = page.get_text()
+                if text.strip():
+                    text_content.append(f"=== 第{page_num + 1}页 ===\n{text}")
+            doc.close()
+            return "\n\n".join(text_content)
+
+        elif ext in (".ppt", ".pptx"):
+            prs = Presentation(io.BytesIO(file_data))
+            text_content = []
+            for slide_num, slide in enumerate(prs.slides, 1):
+                slide_texts = []
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        slide_texts.append(shape.text.strip())
+                if slide_texts:
+                    text_content.append(f"=== 第{slide_num}页 ===\n" + "\n".join(slide_texts))
+            return "\n\n".join(text_content)
+
+        elif ext in (".doc", ".docx"):
+            text_content = []
+            try:
+                from docx import Document
+                doc = Document(io.BytesIO(file_data))
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        text_content.append(para.text.strip())
+                for table_idx, table in enumerate(doc.tables):
+                    table_texts = []
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                        if row_text:
+                            table_texts.append(row_text)
+                    if table_texts:
+                        text_content.append(f"\n=== 表格{table_idx + 1} ===\n" + "\n".join(table_texts))
+            except Exception as e:
+                logger.warning(f"解析Word失败: {e}")
+                text_content.append(file_data.decode('utf-8', errors='ignore'))
+            return "\n\n".join(text_content)
+
+        elif ext in (".xls", ".xlsx"):
+            text_content = []
+            try:
+                if ext == ".xlsx":
+                    from openpyxl import load_workbook
+                    wb = load_workbook(io.BytesIO(file_data), data_only=True)
+                    for sheet_name in wb.sheetnames:
+                        sheet = wb[sheet_name]
+                        sheet_texts = [f"=== 工作表: {sheet_name} ==="]
+                        for row in sheet.iter_rows(values_only=True):
+                            row_values = [str(cell) if cell is not None else "" for cell in row]
+                            row_text = " | ".join(row_values)
+                            if row_text.strip(" |"):
+                                sheet_texts.append(row_text)
+                        if len(sheet_texts) > 1:
+                            text_content.append("\n".join(sheet_texts))
+                else:
+                    import xlrd
+                    workbook = xlrd.open_workbook(file_contents=file_data)
+                    for sheet in workbook.sheets():
+                        sheet_texts = [f"=== 工作表: {sheet.name} ==="]
+                        for row_idx in range(sheet.nrows):
+                            row_values = [str(sheet.cell_value(row_idx, col_idx)) for col_idx in range(sheet.ncols)]
+                            row_text = " | ".join(row_values)
+                            if row_text.strip(" |"):
+                                sheet_texts.append(row_text)
+                        if len(sheet_texts) > 1:
+                            text_content.append("\n".join(sheet_texts))
+            except Exception as e:
+                logger.warning(f"解析Excel失败: {e}")
+            return "\n\n".join(text_content)
+
+        elif ext in (".md", ".txt"):
+            encodings = ['utf-8', 'gbk', 'gb2312', 'utf-16']
+            for encoding in encodings:
+                try:
+                    return file_data.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+            return file_data.decode('utf-8', errors='ignore')
+
+        return ""
 
 
 # 全局文档解析器实例
