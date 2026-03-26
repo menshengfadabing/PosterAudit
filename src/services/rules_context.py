@@ -16,6 +16,7 @@ from src.models.schemas import (
     FontRules,
     LayoutRules,
     LogoRules,
+    SecondaryRule,
 )
 from src.utils.config import settings, get_app_dir
 
@@ -44,13 +45,14 @@ class RulesContextManager:
 
     def _load_default_rules(self) -> None:
         """加载默认规范配置"""
-        default_path = Path(settings.brand_rules_path)
+        # 新位置：data/rules/default/current.json
+        default_path = self.rules_dir / "default" / "current.json"
         if default_path.exists():
             try:
                 with open(default_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                rules = self._parse_rules_data(data, str(default_path))
+                rules = BrandRules(**data)
                 self._cache["default"] = rules
                 logger.info(f"已加载默认规范: {rules.brand_name}")
             except Exception as e:
@@ -219,6 +221,21 @@ class RulesContextManager:
                 layout_parts.append(rules.layout.description)
             if layout_parts:
                 lines.append("布局：" + " | ".join(layout_parts))
+
+        # 次要规范 - 按分类追加
+        if rules.secondary_rules:
+            # 按分类分组
+            categories = {}
+            for rule in rules.secondary_rules:
+                if rule.category not in categories:
+                    categories[rule.category] = []
+                categories[rule.category].append(rule)
+
+            for category, rules_list in categories.items():
+                # 每个分类最多取前3条重要规则，节省token
+                top_rules = sorted(rules_list, key=lambda x: x.priority)[:3]
+                contents = "; ".join(f"{r.name}:{r.content}" for r in top_rules)
+                lines.append(f"{category}：{contents}")
 
         return "\n".join(lines)
 
