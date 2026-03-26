@@ -137,6 +137,8 @@ class ColorRules(BaseModel):
     primary: Optional[ColorRule] = Field(default=None, description="主色")
     secondary: list[ColorRule] = Field(default_factory=list, description="辅助色")
     forbidden: list[ColorRule] = Field(default_factory=list, description="禁用色")
+    additional_rules: list[str] = Field(default_factory=list, description="其他色彩相关规则")
+    description: Optional[str] = Field(default=None, description="整体描述")
 
 
 class LogoRules(BaseModel):
@@ -145,6 +147,10 @@ class LogoRules(BaseModel):
     position_description: str = Field(default="", description="位置描述")
     size_range: dict[str, int] = Field(default_factory=lambda: {"min": 5, "max": 10}, description="尺寸范围")
     safe_margin_px: int = Field(default=20, description="安全间距")
+    additional_rules: list[str] = Field(default_factory=list, description="其他Logo相关规则")
+    min_display_ratio: Optional[str] = Field(default=None, description="最小显示比例")
+    color_requirements: list[str] = Field(default_factory=list, description="颜色要求")
+    background_requirements: list[str] = Field(default_factory=list, description="背景要求")
 
 
 class FontRules(BaseModel):
@@ -155,6 +161,7 @@ class FontRules(BaseModel):
     weight_rules: list[str] = Field(default_factory=list, description="允许的字重")
     style_rules: list[str] = Field(default_factory=list, description="允许的字体风格")
     note: Optional[str] = Field(default=None, description="备注")
+    additional_rules: list[str] = Field(default_factory=list, description="其他字体相关规则")
 
 
 class ForbiddenWord(BaseModel):
