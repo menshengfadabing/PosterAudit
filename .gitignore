@@ -22,7 +22,9 @@ venv/
 logs/
 
 # User data (not to be packaged)
-data/
+data/audit_history/
+data/exports/
+data/uploads/
 
 # Test files
 test/
