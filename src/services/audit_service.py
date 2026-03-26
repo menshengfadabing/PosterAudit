@@ -22,6 +22,7 @@ from src.models.schemas import (
     StyleScore,
     CheckItem,
     AuditStatus,
+    RuleCheckItem,
 )
 from src.services.llm_service import llm_service
 from src.services.rules_context import rules_context
@@ -200,18 +201,18 @@ class AuditService:
             logger.info("预处理图片...")
             image_base64, image_format = self.preprocess_image(image_base64, image_format)
 
-            # 获取品牌规范文本
-            rules_text = rules_context.get_rules_text(brand_id)
+            # 获取品牌规范规则清单
+            rules_checklist = rules_context.get_rules_checklist(brand_id)
 
             logger.info("调用LLM审核...")
             result = llm_service.audit_image(
                 image_base64=image_base64,
                 image_format=image_format,
-                rules_text=rules_text,
+                rules_checklist=rules_checklist,
                 progress_callback=progress_callback,
             )
 
-            return self._build_report(result)
+            return self._build_report(result, rules_checklist)
 
         except Exception as e:
             logger.error(f"审核失败: {e}", exc_info=True)
@@ -338,7 +339,8 @@ class AuditService:
                 image_sizes.append((1920, 1080))  # 默认尺寸
 
         # 获取品牌规范
-        rules_text = rules_context.get_rules_text(brand_id)
+        rules_checklist = rules_context.get_rules_checklist(brand_id)
+        rules_text = rules_context.get_rules_text(brand_id)  # 用于计算token
 
         # 计算单次请求可容纳的最大图片数
         if max_images_per_request is None:
@@ -358,7 +360,7 @@ class AuditService:
             # 调用LLM批量审核
             batch_results = llm_service.audit_images_batch(
                 images=batch_images,
-                rules_text=rules_text,
+                rules_checklist=rules_checklist,
                 progress_callback=None,
             )
 
@@ -380,9 +382,9 @@ class AuditService:
                         single_result = llm_service.audit_image(
                             image_base64=batch_images[i]["base64"],
                             image_format=batch_images[i]["format"],
-                            rules_text=rules_text,
+                            rules_checklist=rules_checklist,
                         )
-                        report = self._build_report(single_result)
+                        report = self._build_report(single_result, rules_checklist)
                         result_item = {
                             "file_name": Path(path).name,
                             "status": "success",
@@ -406,7 +408,7 @@ class AuditService:
                 # 转换结果格式
                 for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
                     try:
-                        report = self._build_report(result)
+                        report = self._build_report(result, rules_checklist)
                         result_item = {
                             "file_name": Path(path).name,
                             "status": "success",
@@ -448,7 +450,7 @@ class AuditService:
         """
         return self.batch_audit_concurrent(image_paths, brand_id, max_concurrent, progress_callback)
 
-    def _build_report(self, result: dict) -> AuditReport:
+    def _build_report(self, result: dict, rules_checklist: list[dict] = None) -> AuditReport:
         """从LLM结果构建审核报告"""
         detection_data = result.get("detection", {})
 
@@ -527,6 +529,9 @@ class AuditService:
                 for item in items
             ]
 
+        # 构建规则检查清单
+        rule_checks = self._build_rule_checks(result, rules_checklist)
+
         # 构建问题列表
         issues = []
         for issue in result.get("issues", []):
@@ -548,9 +553,48 @@ class AuditService:
             status=AuditStatus(result.get("status", "fail")),
             detection=detection,
             checks=checks,
+            rule_checks=rule_checks,
             issues=issues,
             summary=result.get("summary", ""),
         )
+
+    def _build_rule_checks(self, result: dict, rules_checklist: list[dict] = None) -> list[RuleCheckItem]:
+        """构建规则检查清单"""
+        rule_checks = []
+
+        # 从 LLM 结果获取 rule_checks
+        llm_rule_checks = result.get("rule_checks", [])
+
+        # 如果有规则清单，按清单顺序构建结果
+        if rules_checklist:
+            # 创建 rule_id -> llm_result 的映射
+            llm_results_map = {r.get("rule_id"): r for r in llm_rule_checks}
+
+            for rule in rules_checklist:
+                rule_id = rule.get("rule_id", "")
+                llm_result = llm_results_map.get(rule_id, {})
+
+                rule_checks.append(RuleCheckItem(
+                    rule_id=rule_id,
+                    rule_content=rule.get("content", ""),
+                    status=llm_result.get("status", "review") if llm_result else "review",
+                    reference=rule.get("reference", ""),
+                    confidence=llm_result.get("confidence", 0.0) if llm_result else 0.0,
+                    detail=llm_result.get("detail", "") if llm_result else "未能获取审核结果",
+                ))
+        else:
+            # 没有规则清单，直接使用 LLM 返回的结果
+            for r in llm_rule_checks:
+                rule_checks.append(RuleCheckItem(
+                    rule_id=r.get("rule_id", ""),
+                    rule_content=r.get("rule_content", ""),
+                    status=r.get("status", "review"),
+                    reference=r.get("reference", ""),
+                    confidence=r.get("confidence", 0.0),
+                    detail=r.get("detail", ""),
+                ))
+
+        return rule_checks
 
 
 # 全局审核服务实例
