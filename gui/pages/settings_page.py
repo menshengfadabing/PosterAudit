@@ -58,34 +58,31 @@ class SettingsPage(ScrollArea):
         # API Key
         key_layout = QHBoxLayout()
         key_label = StrongBodyLabel("API Key")
-        key_label.setFixedWidth(100)
         self.deepseek_key_edit = PasswordLineEdit()
         self.deepseek_key_edit.setPlaceholderText("输入 DeepSeek API 密钥...")
         self.deepseek_key_edit.setClearButtonEnabled(True)
         key_layout.addWidget(key_label)
-        key_layout.addWidget(self.deepseek_key_edit)
+        key_layout.addWidget(self.deepseek_key_edit, 1)
         rules_layout.addLayout(key_layout)
 
         # API Base
         base_layout = QHBoxLayout()
         base_label = StrongBodyLabel("API 地址")
-        base_label.setFixedWidth(100)
         self.deepseek_base_edit = LineEdit()
         self.deepseek_base_edit.setPlaceholderText("https://api.deepseek.com")
         self.deepseek_base_edit.setClearButtonEnabled(True)
         base_layout.addWidget(base_label)
-        base_layout.addWidget(self.deepseek_base_edit)
+        base_layout.addWidget(self.deepseek_base_edit, 1)
         rules_layout.addLayout(base_layout)
 
         # Model
         model_layout = QHBoxLayout()
         model_label = StrongBodyLabel("模型名称")
-        model_label.setFixedWidth(100)
         self.deepseek_model_edit = LineEdit()
         self.deepseek_model_edit.setPlaceholderText("deepseek-chat")
         self.deepseek_model_edit.setClearButtonEnabled(True)
         model_layout.addWidget(model_label)
-        model_layout.addWidget(self.deepseek_model_edit)
+        model_layout.addWidget(self.deepseek_model_edit, 1)
         rules_layout.addLayout(model_layout)
 
         # 测试按钮行
@@ -117,34 +114,31 @@ class SettingsPage(ScrollArea):
         # API Key
         key_layout2 = QHBoxLayout()
         key_label2 = StrongBodyLabel("API Key")
-        key_label2.setFixedWidth(100)
         self.doubao_key_edit = PasswordLineEdit()
         self.doubao_key_edit.setPlaceholderText("输入 Doubao API 密钥...")
         self.doubao_key_edit.setClearButtonEnabled(True)
         key_layout2.addWidget(key_label2)
-        key_layout2.addWidget(self.doubao_key_edit)
+        key_layout2.addWidget(self.doubao_key_edit, 1)
         audit_layout.addLayout(key_layout2)
 
         # API Base
         base_layout2 = QHBoxLayout()
         base_label2 = StrongBodyLabel("API 地址")
-        base_label2.setFixedWidth(100)
         self.doubao_base_edit = LineEdit()
         self.doubao_base_edit.setPlaceholderText("https://ark.cn-beijing.volces.com/api/v3")
         self.doubao_base_edit.setClearButtonEnabled(True)
         base_layout2.addWidget(base_label2)
-        base_layout2.addWidget(self.doubao_base_edit)
+        base_layout2.addWidget(self.doubao_base_edit, 1)
         audit_layout.addLayout(base_layout2)
 
         # Model
         model_layout2 = QHBoxLayout()
         model_label2 = StrongBodyLabel("模型名称")
-        model_label2.setFixedWidth(100)
         self.doubao_model_edit = LineEdit()
         self.doubao_model_edit.setPlaceholderText("doubao-vision-pro-32k")
         self.doubao_model_edit.setClearButtonEnabled(True)
         model_layout2.addWidget(model_label2)
-        model_layout2.addWidget(self.doubao_model_edit)
+        model_layout2.addWidget(self.doubao_model_edit, 1)
         audit_layout.addLayout(model_layout2)
 
         # 测试按钮行
@@ -164,7 +158,6 @@ class SettingsPage(ScrollArea):
         # 保存按钮
         btn_layout = QHBoxLayout()
         save_btn = PrimaryPushButton("保存配置")
-        save_btn.setMinimumWidth(150)
         save_btn.clicked.connect(self._save_api_config)
         btn_layout.addWidget(save_btn)
         btn_layout.addStretch()

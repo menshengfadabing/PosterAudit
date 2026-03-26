@@ -75,7 +75,6 @@ class ProgressPanel(QFrame):
                 color: #d4d4d4;
                 border: none;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 12px;
             }
         """)
 
@@ -88,7 +87,7 @@ class ProgressPanel(QFrame):
         top_layout.setSpacing(15)
 
         self.status_label = QLabel("就绪")
-        self.status_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.status_label.setStyleSheet("font-weight: bold;")
         top_layout.addWidget(self.status_label, 1)
 
         self.toggle_btn = QPushButton("展开日志")
@@ -106,19 +105,17 @@ class ProgressPanel(QFrame):
         # 进度条
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setMinimumHeight(24)
         layout.addWidget(self.progress_bar)
 
         # 详细信息标签
         self.detail_label = QLabel("")
-        self.detail_label.setStyleSheet("color: #7f8c8d; font-size: 12px;")
+        self.detail_label.setStyleSheet("color: #7f8c8d;")
         layout.addWidget(self.detail_label)
 
         # 终端日志区域（默认隐藏）
         self.log_text = QTextEdit()
         self.log_text.setVisible(False)
         self.log_text.setReadOnly(True)
-        self.log_text.setMinimumHeight(200)
         layout.addWidget(self.log_text)
 
         self.setVisible(False)
@@ -208,13 +205,13 @@ class ProgressPanel(QFrame):
 
         if success:
             self.status_label.setText("完成")
-            self.status_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #27ae60;")
+            self.status_label.setStyleSheet("font-weight: bold; color: #27ae60;")
             if message:
                 self.detail_label.setText(message)
                 self._append_log(logging.INFO, f"[SUCCESS] {message}")
         else:
             self.status_label.setText("失败")
-            self.status_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #e74c3c;")
+            self.status_label.setStyleSheet("font-weight: bold; color: #e74c3c;")
             if message:
                 self.detail_label.setText(message)
                 self._append_log(logging.ERROR, f"[ERROR] {message}")
@@ -238,4 +235,4 @@ class ProgressPanel(QFrame):
         self._is_expanded = False
         self.toggle_btn.setText("展开日志")
         self.log_text.setVisible(False)
-        self.status_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.status_label.setStyleSheet("font-weight: bold;")

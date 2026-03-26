@@ -58,7 +58,6 @@ class HistoryPage(ScrollArea):
 
         # 左侧：报告列表
         left_card = CardWidget()
-        left_card.setMinimumWidth(480)
         left_layout = QVBoxLayout(left_card)
         left_layout.setContentsMargins(20, 20, 20, 20)
         left_layout.setSpacing(12)
@@ -116,7 +115,6 @@ class HistoryPage(ScrollArea):
 
         # 右侧：报告详情
         right_card = CardWidget()
-        right_card.setMinimumWidth(400)
         right_layout = QVBoxLayout(right_card)
         right_layout.setContentsMargins(20, 20, 20, 20)
         right_layout.setSpacing(12)

@@ -92,7 +92,6 @@ class AuditPage(ScrollArea):
 
         # 左侧：设置区域
         left_card = CardWidget()
-        left_card.setMinimumWidth(380)
         left_layout = QVBoxLayout(left_card)
         left_layout.setContentsMargins(20, 20, 20, 20)
         left_layout.setSpacing(16)
@@ -104,18 +103,14 @@ class AuditPage(ScrollArea):
         # 品牌选择
         brand_layout = QHBoxLayout()
         brand_label = BodyLabel("品牌规范:")
-        brand_label.setFixedWidth(80)
         self.brand_combo = ComboBox()
-        self.brand_combo.setMinimumWidth(260)
         brand_layout.addWidget(brand_label)
-        brand_layout.addWidget(self.brand_combo)
-        brand_layout.addStretch()
+        brand_layout.addWidget(self.brand_combo, 1)
         left_layout.addLayout(brand_layout)
 
         # 压缩预设选择
         compression_layout = QHBoxLayout()
         compression_label = BodyLabel("图片压缩:")
-        compression_label.setFixedWidth(80)
         self.single_compression_combo = ComboBox()
         self.single_compression_combo.addItems([
             "均衡（推荐）",
@@ -129,10 +124,8 @@ class AuditPage(ScrollArea):
             "高压缩：1280px/300KB/60%，最小传输量\n"
             "不压缩：原图传输，消耗更多Token"
         )
-        self.single_compression_combo.setMinimumWidth(260)
         compression_layout.addWidget(compression_label)
-        compression_layout.addWidget(self.single_compression_combo)
-        compression_layout.addStretch()
+        compression_layout.addWidget(self.single_compression_combo, 1)
         left_layout.addLayout(compression_layout)
 
         # 图片选择
@@ -147,7 +140,6 @@ class AuditPage(ScrollArea):
         self.audit_btn = PrimaryPushButton("开始审核")
         self.audit_btn.clicked.connect(self._on_audit)
         self.audit_btn.setEnabled(False)
-        self.audit_btn.setMinimumHeight(45)
         left_layout.addWidget(self.audit_btn)
 
         # 进度
@@ -160,11 +152,10 @@ class AuditPage(ScrollArea):
         left_layout.addWidget(self.status_label)
 
         left_layout.addStretch()
-        layout.addWidget(left_card, 1)
+        layout.addWidget(left_card, 2)
 
         # 右侧：结果展示
         right_card = CardWidget()
-        right_card.setMinimumWidth(520)
         right_layout = QVBoxLayout(right_card)
         right_layout.setContentsMargins(20, 20, 20, 20)
         right_layout.setSpacing(12)
@@ -180,7 +171,6 @@ class AuditPage(ScrollArea):
         score_layout.setContentsMargins(20, 20, 20, 20)
 
         self.score_label = TitleLabel("--")
-        self.score_label.setStyleSheet("font-size: 32px;")
         score_layout.addWidget(self.score_label)
 
         score_layout.addStretch()
@@ -222,9 +212,8 @@ class AuditPage(ScrollArea):
         self.rule_checks_table.setColumnCount(5)
         self.rule_checks_table.setHorizontalHeaderLabels(["状态", "规则ID", "规则内容", "结果", "置信度"])
         self.rule_checks_table.horizontalHeader().setStretchLastSection(True)
-        self.rule_checks_table.setMinimumHeight(200)
         self.rule_checks_table.setVisible(False)
-        right_layout.addWidget(self.rule_checks_table)
+        right_layout.addWidget(self.rule_checks_table, 1)
 
         right_layout.addStretch()
 
@@ -247,7 +236,7 @@ class AuditPage(ScrollArea):
         export_layout.addWidget(self.export_md_btn)
         right_layout.addLayout(export_layout)
 
-        layout.addWidget(right_card, 1)
+        layout.addWidget(right_card, 3)
 
         # 加载品牌列表
         self._load_brand_list()
@@ -295,18 +284,14 @@ class AuditPage(ScrollArea):
         # 品牌选择
         brand_row = QHBoxLayout()
         brand_label = BodyLabel("品牌规范:")
-        brand_label.setFixedWidth(80)
         self.batch_brand_combo = ComboBox()
-        self.batch_brand_combo.setMinimumWidth(320)
         brand_row.addWidget(brand_label)
-        brand_row.addWidget(self.batch_brand_combo)
-        brand_row.addStretch()
+        brand_row.addWidget(self.batch_brand_combo, 1)
         settings_layout.addLayout(brand_row)
 
         # 审核方案选择
         mode_row = QHBoxLayout()
         mode_label = BodyLabel("审核方案:")
-        mode_label.setFixedWidth(80)
         self.audit_mode_combo = ComboBox()
         self.audit_mode_combo.addItems([
             "并发请求（推荐，速度快）",
@@ -316,16 +301,13 @@ class AuditPage(ScrollArea):
             "并发请求：同时发送多个API请求，速度更快\n"
             "合并请求：单次API处理多图，节省Prompt重复传输"
         )
-        self.audit_mode_combo.setMinimumWidth(320)
         mode_row.addWidget(mode_label)
-        mode_row.addWidget(self.audit_mode_combo)
-        mode_row.addStretch()
+        mode_row.addWidget(self.audit_mode_combo, 1)
         settings_layout.addLayout(mode_row)
 
         # 并发数设置
         concurrent_row = QHBoxLayout()
         concurrent_label = BodyLabel("并发数:")
-        concurrent_label.setFixedWidth(80)
         self.concurrent_spin = SpinBox()
         self.concurrent_spin.setRange(1, 10)
         self.concurrent_spin.setValue(5)
@@ -339,7 +321,6 @@ class AuditPage(ScrollArea):
         # 压缩预设选择
         compression_row = QHBoxLayout()
         compression_label = BodyLabel("图片压缩:")
-        compression_label.setFixedWidth(80)
         self.compression_combo = ComboBox()
         self.compression_combo.addItems([
             "均衡（推荐，1920px/500KB/75%）",
@@ -353,10 +334,8 @@ class AuditPage(ScrollArea):
             "高压缩：最小传输量，适合网速较慢或大量图片\n"
             "不压缩：保留原图，消耗更多Token"
         )
-        self.compression_combo.setMinimumWidth(320)
         compression_row.addWidget(compression_label)
-        compression_row.addWidget(self.compression_combo)
-        compression_row.addStretch()
+        compression_row.addWidget(self.compression_combo, 1)
         settings_layout.addLayout(compression_row)
 
         layout.addWidget(settings_card)
@@ -387,7 +366,6 @@ class AuditPage(ScrollArea):
         self.batch_audit_btn = PrimaryPushButton("开始批量审核")
         self.batch_audit_btn.clicked.connect(self._on_batch_audit)
         self.batch_audit_btn.setEnabled(False)
-        self.batch_audit_btn.setMinimumHeight(45)
         btn_layout.addWidget(self.batch_audit_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
@@ -565,7 +543,7 @@ class AuditPage(ScrollArea):
 
         # 显示等级而非分数
         self.score_label.setText(grade_text)
-        self.score_label.setStyleSheet(f"font-size: 32px; color: {color}; font-weight: bold;")
+        self.score_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
         # 状态徽章
         self.status_badge.setText(status_text)

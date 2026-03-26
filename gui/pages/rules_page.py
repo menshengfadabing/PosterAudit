@@ -68,7 +68,6 @@ class RulesPage(ScrollArea):
 
         # 左侧：规范列表
         left_card = CardWidget()
-        left_card.setMinimumWidth(380)
         left_layout = QVBoxLayout(left_card)
         left_layout.setContentsMargins(20, 20, 20, 20)
         left_layout.setSpacing(16)
@@ -79,10 +78,8 @@ class RulesPage(ScrollArea):
 
         select_layout = QHBoxLayout()
         self.rules_combo = ComboBox()
-        self.rules_combo.setMinimumWidth(300)
         self.rules_combo.currentIndexChanged.connect(self._on_rules_changed)
-        select_layout.addWidget(self.rules_combo)
-        select_layout.addStretch()
+        select_layout.addWidget(self.rules_combo, 1)
         left_layout.addLayout(select_layout)
 
         # 规范信息卡片
@@ -113,7 +110,6 @@ class RulesPage(ScrollArea):
 
         # 右侧：规范详情
         right_card = CardWidget()
-        right_card.setMinimumWidth(500)
         right_layout = QVBoxLayout(right_card)
         right_layout.setContentsMargins(20, 20, 20, 20)
         right_layout.setSpacing(12)
