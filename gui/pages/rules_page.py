@@ -244,6 +244,25 @@ class RulesPage(ScrollArea):
             lines.append(f"  最小边距: {rules.layout.margin_min}px")
             if rules.layout.description:
                 lines.append(f"  说明: {rules.layout.description}")
+            lines.append("")
+
+        # 次要规范 - 按分类展示
+        if hasattr(rules, 'secondary_rules') and rules.secondary_rules:
+            has_structured_rules = True
+            lines.append("【次要规范】")
+
+            # 按分类分组
+            categories = {}
+            for rule in rules.secondary_rules:
+                if rule.category not in categories:
+                    categories[rule.category] = []
+                categories[rule.category].append(rule)
+
+            for category, rules_list in categories.items():
+                lines.append(f"  {category}:")
+                for rule in sorted(rules_list, key=lambda x: x.priority):
+                    lines.append(f"    - {rule.name}: {rule.content}")
+            lines.append("")
 
         # 如果没有结构化规则，显示原始文本
         if not has_structured_rules and rules.raw_text:
