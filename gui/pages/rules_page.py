@@ -93,12 +93,7 @@ class RulesPage(ScrollArea):
         info_layout.setSpacing(8)
 
         self.brand_name_label = BodyLabel("品牌名称: --")
-        self.version_label = BodyLabel("版本: --")
-        self.rules_count_label = CaptionLabel("规则项: --")
-
         info_layout.addWidget(self.brand_name_label)
-        info_layout.addWidget(self.version_label)
-        info_layout.addWidget(self.rules_count_label)
         left_layout.addWidget(info_card)
 
         # 操作按钮
@@ -174,19 +169,6 @@ class RulesPage(ScrollArea):
             if rules:
                 # 更新信息
                 self.brand_name_label.setText(f"品牌名称: {rules.brand_name}")
-                self.version_label.setText(f"版本: {rules.version}")
-
-                # 统计规则项
-                count = 0
-                if rules.color:
-                    count += (1 if rules.color.primary else 0) + len(rules.color.secondary or [])
-                if rules.logo:
-                    count += 1
-                if rules.font:
-                    count += len(rules.font.allowed or []) + len(rules.font.forbidden or [])
-                if rules.copywriting and rules.copywriting.forbidden_words:
-                    count += len(rules.copywriting.forbidden_words)
-                self.rules_count_label.setText(f"规则项: {count}")
 
                 # 格式化显示规范详情
                 self.rules_preview.setPlainText(self._format_rules_detail(rules))
@@ -200,19 +182,18 @@ class RulesPage(ScrollArea):
     def _clear_info(self):
         """清空信息"""
         self.brand_name_label.setText("品牌名称: --")
-        self.version_label.setText("版本: --")
-        self.rules_count_label.setText("规则项: --")
         self.rules_preview.clear()
 
     def _format_rules_detail(self, rules) -> str:
         """格式化规范详情显示"""
-        lines = [f"品牌名称: {rules.brand_name}", f"版本: {rules.version}", ""]
+        lines = [f"品牌名称: {rules.brand_name}", ""]
 
-        has_structured_rules = False
+        # === 主要规范 ===
+        has_primary_rules = False
 
         # 色彩规范
         if rules.color and (rules.color.primary or rules.color.secondary or rules.color.forbidden):
-            has_structured_rules = True
+            has_primary_rules = True
             lines.append("【色彩规范】")
             if rules.color.primary:
                 lines.append(f"  主色: {rules.color.primary.value} ({rules.color.primary.name})")
@@ -226,7 +207,7 @@ class RulesPage(ScrollArea):
 
         # Logo规范
         if rules.logo and (rules.logo.position_description or rules.logo.size_range):
-            has_structured_rules = True
+            has_primary_rules = True
             lines.append("【Logo规范】")
             lines.append(f"  位置: {rules.logo.position_description}")
             if rules.logo.size_range:
@@ -236,7 +217,7 @@ class RulesPage(ScrollArea):
 
         # 字体规范
         if rules.font and (rules.font.allowed or rules.font.forbidden):
-            has_structured_rules = True
+            has_primary_rules = True
             lines.append("【字体规范】")
             if rules.font.allowed:
                 lines.append(f"  允许: {', '.join(rules.font.allowed)}")
@@ -244,26 +225,12 @@ class RulesPage(ScrollArea):
                 lines.append(f"  禁用: {', '.join(rules.font.forbidden)}")
             lines.append("")
 
-        # 文案规范
-        if rules.copywriting and rules.copywriting.forbidden_words:
-            has_structured_rules = True
-            lines.append("【文案规范】")
-            words = ", ".join(w.word for w in rules.copywriting.forbidden_words)
-            lines.append(f"  禁用词: {words}")
+        if not has_primary_rules:
+            lines.append("【主要规范】暂无")
             lines.append("")
 
-        # 布局规范
-        if rules.layout and rules.layout.margin_min:
-            has_structured_rules = True
-            lines.append("【布局规范】")
-            lines.append(f"  最小边距: {rules.layout.margin_min}px")
-            if rules.layout.description:
-                lines.append(f"  说明: {rules.layout.description}")
-            lines.append("")
-
-        # 次要规范 - 按分类展示（完整）
+        # === 次要规范 ===
         if hasattr(rules, 'secondary_rules') and rules.secondary_rules:
-            has_structured_rules = True
             lines.append("【次要规范】")
 
             # 按分类分组
@@ -278,12 +245,8 @@ class RulesPage(ScrollArea):
                 for rule in sorted(rules_list, key=lambda x: x.priority):
                     lines.append(f"    - {rule.name}: {rule.content}")
             lines.append("")
-
-        # 原始规范文本 - 始终显示完整版
-        if rules.raw_text:
-            lines.append("【原始规范文本】")
-            lines.append("")
-            lines.append(rules.raw_text)
+        else:
+            lines.append("【次要规范】暂无")
             lines.append("")
 
         return "\n".join(lines)
@@ -363,9 +326,13 @@ class RulesPage(ScrollArea):
         """将规范转换为Markdown格式"""
         lines = [f"# {rules.brand_name} 品牌规范", ""]
 
+        # 主要规范
+        lines.append("## 主要规范")
+        lines.append("")
+
         # 色彩规范
         if rules.color:
-            lines.append("## 色彩规范")
+            lines.append("### 色彩规范")
             if rules.color.primary:
                 lines.append(f"- **主色**: {rules.color.primary.value} ({rules.color.primary.name})")
             if rules.color.secondary:
@@ -381,7 +348,7 @@ class RulesPage(ScrollArea):
 
         # Logo规范
         if rules.logo:
-            lines.append("## Logo规范")
+            lines.append("### Logo规范")
             lines.append(f"- **位置**: {rules.logo.position_description}")
             if rules.logo.size_range:
                 lines.append(f"- **尺寸范围**: {rules.logo.size_range.get('min', 5)}% - {rules.logo.size_range.get('max', 15)}%")
@@ -390,31 +357,17 @@ class RulesPage(ScrollArea):
 
         # 字体规范
         if rules.font:
-            lines.append("## 字体规范")
+            lines.append("### 字体规范")
             if rules.font.allowed:
                 lines.append(f"- **允许字体**: {', '.join(rules.font.allowed)}")
             if rules.font.forbidden:
                 lines.append(f"- **禁用字体**: {', '.join(rules.font.forbidden)}")
             lines.append("")
 
-        # 文案规范
-        if rules.copywriting and rules.copywriting.forbidden_words:
-            lines.append("## 文案规范")
-            words = ", ".join(w.word for w in rules.copywriting.forbidden_words)
-            lines.append(f"- **禁用词**: {words}")
-            lines.append("")
-
-        # 布局规范
-        if rules.layout:
-            lines.append("## 布局规范")
-            lines.append(f"- **最小边距**: {rules.layout.margin_min}px")
-            if rules.layout.description:
-                lines.append(f"- **说明**: {rules.layout.description}")
-            lines.append("")
-
         # 次要规范
         if hasattr(rules, 'secondary_rules') and rules.secondary_rules:
-            lines.append("## 其他规范")
+            lines.append("## 次要规范")
+            lines.append("")
             categories = {}
             for rule in rules.secondary_rules:
                 if rule.category not in categories:
@@ -426,12 +379,6 @@ class RulesPage(ScrollArea):
                 for rule in sorted(rules_list, key=lambda x: x.priority):
                     lines.append(f"- **{rule.name}**: {rule.content}")
                 lines.append("")
-
-        # 原始规范文本 - 完整导出
-        if rules.raw_text:
-            lines.append("## 原始规范文本")
-            lines.append("")
-            lines.append(rules.raw_text)
 
         return "\n".join(lines)
 
