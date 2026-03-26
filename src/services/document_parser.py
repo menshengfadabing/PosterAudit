@@ -18,6 +18,7 @@ from src.models.schemas import (
     FontRules,
     LayoutRules,
     LogoRules,
+    SecondaryRule,
 )
 from src.utils.config import settings
 
@@ -304,13 +305,19 @@ class DocumentParser:
 
         system_prompt = """你是品牌规范文档解析专家。请从品牌规范文档中提取结构化规则信息。
 
-你需要提取以下信息：
-1. 品牌名称 (brand_name)
-2. 色彩规范 (color)：主色、辅助色、禁用色
-3. Logo规范 (logo)：位置、尺寸范围、安全间距
-4. 字体规范 (font)：允许字体、禁用字体
-5. 文案规范 (copywriting)：禁用词
-6. 布局规范 (layout)：最小边距
+你需要将规范分为两类：
+
+【主要规范】- 固定结构，每次审查必须携带：
+1. 色彩规范 (color)：主色、辅助色、禁用色
+2. Logo规范 (logo)：位置、尺寸范围、安全间距
+3. 字体规范 (font)：允许字体、禁用字体
+
+【次要规范】- 动态追加，按分类整理：
+- 排版：边距、对齐、图文关系、版面聚焦等
+- 文案：禁用词、必须内容
+- 风格：如"阳光、健康、专业、生态"等品牌调性
+- 高风险标签：具体的负向问题标签
+- 其他：其他补充说明
 
 输出JSON格式：
 ```json
@@ -329,8 +336,7 @@ class DocumentParser:
   },
   "font": {
     "allowed": ["字体1", "字体2"],
-    "forbidden": ["字体3"],
-    "size_rules": {"标题": "32px", "正文": "14px"}
+    "forbidden": ["字体3"]
   },
   "copywriting": {
     "forbidden_words": [{"word": "词语", "category": "分类"}]
@@ -338,13 +344,29 @@ class DocumentParser:
   "layout": {
     "margin_min": 20,
     "description": "布局说明"
-  }
+  },
+  "secondary_rules": [
+    {
+      "category": "排版",
+      "name": "文本与主体关系",
+      "content": "文字应优先放置于图片空白区，不应压在主体焦点区域上",
+      "priority": 1
+    },
+    {
+      "category": "风格",
+      "name": "品牌调性",
+      "content": "阳光、健康、专业、生态",
+      "priority": 1
+    }
+  ]
 }
 ```
 
 规则：
 - 颜色值必须是十六进制格式如 #00A4FF
-- 如果文档中未提及某项，该字段设为 null
+- 次要规范要按分类整理，不能省略任何有效信息
+- priority: 1=重要, 2=一般, 3=参考
+- 如果文档中未提及某项主要规范，该字段设为 null
 - 只输出JSON，不要其他文字"""
 
         # 截取文本，保留关键内容
@@ -427,10 +449,15 @@ class DocumentParser:
             if data.get("layout"):
                 self._parse_layout_rules(rules, data["layout"])
 
+            # 解析次要规范
+            if data.get("secondary_rules"):
+                self._parse_secondary_rules(rules, data["secondary_rules"])
+
             logger.info(f"LLM规则提取完成: brand_name={rules.brand_name}, "
                        f"color={rules.color is not None}, "
                        f"logo={rules.logo is not None}, "
-                       f"font={rules.font is not None}")
+                       f"font={rules.font is not None}, "
+                       f"secondary_rules={len(rules.secondary_rules)}项")
 
             return rules
 
@@ -575,6 +602,18 @@ class DocumentParser:
                 margin_min=int(margin_min) if margin_min else 20,
                 description=description,
             )
+
+    def _parse_secondary_rules(self, rules: BrandRules, secondary_data: list):
+        """解析次要规范"""
+        for item in secondary_data:
+            if isinstance(item, dict) and item.get("name") and item.get("content"):
+                rule = SecondaryRule(
+                    category=item.get("category", "其他"),
+                    name=item.get("name", ""),
+                    content=item.get("content", ""),
+                    priority=item.get("priority", 1),
+                )
+                rules.secondary_rules.append(rule)
 
 
 # 全局文档解析器实例
