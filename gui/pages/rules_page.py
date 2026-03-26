@@ -126,6 +126,21 @@ class RulesPage(ScrollArea):
         detail_title = StrongBodyLabel("规范详情预览")
         right_layout.addWidget(detail_title)
 
+        # 导出按钮行
+        export_layout = QHBoxLayout()
+        self.export_json_btn = PushButton("导出JSON")
+        self.export_json_btn.setIcon(FIF.SAVE)
+        self.export_json_btn.clicked.connect(self._export_json)
+        export_layout.addWidget(self.export_json_btn)
+
+        self.export_md_btn = PushButton("导出Markdown")
+        self.export_md_btn.setIcon(FIF.DOCUMENT)
+        self.export_md_btn.clicked.connect(self._export_markdown)
+        export_layout.addWidget(self.export_md_btn)
+
+        export_layout.addStretch()
+        right_layout.addLayout(export_layout)
+
         # 规范预览
         self.rules_preview = TextEdit()
         self.rules_preview.setReadOnly(True)
@@ -273,6 +288,147 @@ class RulesPage(ScrollArea):
             if len(rules.raw_text) > 3000:
                 text += f"\n\n... (共 {len(rules.raw_text)} 字符，已截取前3000字)"
             lines.append(text)
+
+        return "\n".join(lines)
+
+    def _export_json(self):
+        """导出规范为JSON"""
+        brand_id = self.rules_combo.currentData()
+        if not brand_id:
+            InfoBar.warning(
+                title="警告",
+                content="请先选择要导出的规范",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+
+        rules = rules_context.get_rules(brand_id)
+        if not rules:
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出JSON",
+            f"{rules.brand_name}_规范.json",
+            "JSON文件 (*.json)"
+        )
+
+        if file_path:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(rules.to_json())
+
+            InfoBar.success(
+                title="导出成功",
+                content=f"已导出到: {file_path}",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
+    def _export_markdown(self):
+        """导出规范为Markdown"""
+        brand_id = self.rules_combo.currentData()
+        if not brand_id:
+            InfoBar.warning(
+                title="警告",
+                content="请先选择要导出的规范",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+
+        rules = rules_context.get_rules(brand_id)
+        if not rules:
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出Markdown",
+            f"{rules.brand_name}_规范.md",
+            "Markdown文件 (*.md)"
+        )
+
+        if file_path:
+            md_content = self._rules_to_markdown(rules)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(md_content)
+
+            InfoBar.success(
+                title="导出成功",
+                content=f"已导出到: {file_path}",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
+    def _rules_to_markdown(self, rules) -> str:
+        """将规范转换为Markdown格式"""
+        lines = [f"# {rules.brand_name} 品牌规范", ""]
+
+        # 色彩规范
+        if rules.color:
+            lines.append("## 色彩规范")
+            if rules.color.primary:
+                lines.append(f"- **主色**: {rules.color.primary.value} ({rules.color.primary.name})")
+            if rules.color.secondary:
+                lines.append("- **辅助色**:")
+                for c in rules.color.secondary:
+                    lines.append(f"  - {c.value} ({c.name})")
+            if rules.color.forbidden:
+                lines.append("- **禁用色**:")
+                for c in rules.color.forbidden:
+                    reason = f" - {c.reason}" if c.reason else ""
+                    lines.append(f"  - {c.value}{reason}")
+            lines.append("")
+
+        # Logo规范
+        if rules.logo:
+            lines.append("## Logo规范")
+            lines.append(f"- **位置**: {rules.logo.position_description}")
+            if rules.logo.size_range:
+                lines.append(f"- **尺寸范围**: {rules.logo.size_range.get('min', 5)}% - {rules.logo.size_range.get('max', 15)}%")
+            lines.append(f"- **安全间距**: {rules.logo.safe_margin_px}px")
+            lines.append("")
+
+        # 字体规范
+        if rules.font:
+            lines.append("## 字体规范")
+            if rules.font.allowed:
+                lines.append(f"- **允许字体**: {', '.join(rules.font.allowed)}")
+            if rules.font.forbidden:
+                lines.append(f"- **禁用字体**: {', '.join(rules.font.forbidden)}")
+            lines.append("")
+
+        # 文案规范
+        if rules.copywriting and rules.copywriting.forbidden_words:
+            lines.append("## 文案规范")
+            words = ", ".join(w.word for w in rules.copywriting.forbidden_words)
+            lines.append(f"- **禁用词**: {words}")
+            lines.append("")
+
+        # 布局规范
+        if rules.layout:
+            lines.append("## 布局规范")
+            lines.append(f"- **最小边距**: {rules.layout.margin_min}px")
+            if rules.layout.description:
+                lines.append(f"- **说明**: {rules.layout.description}")
+            lines.append("")
+
+        # 次要规范
+        if hasattr(rules, 'secondary_rules') and rules.secondary_rules:
+            lines.append("## 其他规范")
+            categories = {}
+            for rule in rules.secondary_rules:
+                if rule.category not in categories:
+                    categories[rule.category] = []
+                categories[rule.category].append(rule)
+
+            for category, rules_list in categories.items():
+                lines.append(f"### {category}")
+                for rule in sorted(rules_list, key=lambda x: x.priority):
+                    lines.append(f"- **{rule.name}**: {rule.content}")
+                lines.append("")
 
         return "\n".join(lines)
 
