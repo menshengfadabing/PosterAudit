@@ -69,8 +69,8 @@ class MainWindow(FluentWindow):
         self.addSubInterface(
             self.historyPage,
             FIF.HISTORY,
-            "报告历史",
-            NavigationItemPosition.BOTTOM
+            "审核历史",
+            NavigationItemPosition.TOP
         )
 
         # 设置默认页面
