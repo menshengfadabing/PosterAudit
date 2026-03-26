@@ -87,7 +87,7 @@ class HistoryPage(ScrollArea):
         # 报告表格
         self.history_table = TableWidget()
         self.history_table.setColumnCount(5)
-        self.history_table.setHorizontalHeaderLabels(["时间", "品牌", "文件数", "评分", "状态"])
+        self.history_table.setHorizontalHeaderLabels(["时间", "品牌", "文件数", "评级", "状态"])
         self.history_table.horizontalHeader().setStretchLastSection(True)
         self.history_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.history_table.cellClicked.connect(self._on_row_clicked)
@@ -133,20 +133,20 @@ class HistoryPage(ScrollArea):
 
         time_lbl = BodyLabel("时间:")
         brand_lbl = BodyLabel("品牌:")
-        score_lbl = BodyLabel("评分:")
+        grade_lbl = BodyLabel("评级:")
         status_lbl = BodyLabel("状态:")
 
         self.time_label = BodyLabel("--")
         self.brand_label = BodyLabel("--")
-        self.score_label = BodyLabel("--")
+        self.grade_label = BodyLabel("--")
         self.status_label = BodyLabel("--")
 
         summary_layout.addWidget(time_lbl, 0, 0)
         summary_layout.addWidget(self.time_label, 0, 1)
         summary_layout.addWidget(brand_lbl, 0, 2)
         summary_layout.addWidget(self.brand_label, 0, 3)
-        summary_layout.addWidget(score_lbl, 1, 0)
-        summary_layout.addWidget(self.score_label, 1, 1)
+        summary_layout.addWidget(grade_lbl, 1, 0)
+        summary_layout.addWidget(self.grade_label, 1, 1)
         summary_layout.addWidget(status_lbl, 1, 2)
         summary_layout.addWidget(self.status_label, 1, 3)
 
@@ -242,18 +242,22 @@ class HistoryPage(ScrollArea):
             self.history_table.setItem(row, 1, QTableWidgetItem(file_info.get('brand_name', '-')))
             self.history_table.setItem(row, 2, QTableWidgetItem(str(file_info.get('file_count', 1))))
 
-            score = file_info.get('score', 0)
-            score_item = QTableWidgetItem(str(score) if score else "-")
-            if score:
-                if score >= 90:
-                    score_item.setForeground(QColor('#27ae60'))
-                elif score >= 70:
-                    score_item.setForeground(QColor('#f39c12'))
-                else:
-                    score_item.setForeground(QColor('#e74c3c'))
-            self.history_table.setItem(row, 3, score_item)
-
+            # 显示评级而非分数
             status = file_info.get('status', 'unknown')
+            grade_map = {'pass': '优', 'warning': '良', 'fail': '差', 'completed': '优', 'unknown': '-'}
+            grade_colors = {'pass': '#27ae60', 'warning': '#f39c12', 'fail': '#e74c3c', 'completed': '#27ae60', 'unknown': '#95a5a6'}
+            grade = grade_map.get(status, '-')
+            grade_item = QTableWidgetItem(grade)
+            grade_item.setForeground(QColor(grade_colors.get(status, '#95a5a6')))
+            self.history_table.setItem(row, 3, grade_item)
+
+            status_styles = {
+                'pass': ('通过', '#27ae60'),
+                'warning': ('需修改', '#f39c12'),
+                'fail': ('不通过', '#e74c3c'),
+                'completed': ('完成', '#27ae60'),
+                'unknown': ('未知', '#95a5a6')
+            }
             status_text, status_color = status_styles.get(status, ('未知', '#95a5a6'))
             status_item = QTableWidgetItem(status_text)
             status_item.setForeground(QColor(status_color))
@@ -278,8 +282,12 @@ class HistoryPage(ScrollArea):
         batch_id = file_info.get("batch_id", "")
         self.time_label.setText(file_info.get("time", "-"))
         self.brand_label.setText(file_info.get("brand_name", "-"))
-        self.score_label.setText(str(file_info.get("score", "-")))
-        self.status_label.setText(file_info.get("status", "-"))
+
+        # 显示评级
+        status = file_info.get("status", "unknown")
+        grade_map = {'pass': '优', 'warning': '良', 'fail': '差', 'completed': '优', 'unknown': '-'}
+        self.grade_label.setText(grade_map.get(status, "-"))
+        self.status_label.setText(status)
 
         # 读取详细报告
         report_file = self.reports_dir / f"{batch_id}.json"
@@ -298,6 +306,7 @@ class HistoryPage(ScrollArea):
     def _render_report_detail(self, data: dict):
         """渲染报告详情 - 完整版"""
         lines = []
+        grade_map = {'pass': '优', 'warning': '良', 'fail': '差', 'error': '错误'}
 
         # 判断是单图还是批量
         if "results" in data:
@@ -305,10 +314,9 @@ class HistoryPage(ScrollArea):
             summary = data.get("summary", {})
             lines.append("【批量审核摘要】")
             lines.append(f"总数: {summary.get('total', 0)}")
-            lines.append(f"通过: {summary.get('pass_count', 0)}")
-            lines.append(f"警告: {summary.get('warning_count', 0)}")
-            lines.append(f"失败: {summary.get('fail_count', 0)}")
-            lines.append(f"平均分: {summary.get('average_score', 0):.1f}")
+            lines.append(f"优: {summary.get('pass_count', 0)}")
+            lines.append(f"良: {summary.get('warning_count', 0)}")
+            lines.append(f"差: {summary.get('fail_count', 0)}")
             lines.append("")
 
             results = data.get("results", [])
@@ -318,8 +326,9 @@ class HistoryPage(ScrollArea):
 
                 for i, r in enumerate(results):  # 显示全部结果
                     status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(r.get("status"), "?")
+                    grade = grade_map.get(r.get("status"), "?")
                     lines.append(f"--- 图片 {i+1}: {r.get('file_name', '-')} ---")
-                    lines.append(f"状态: {status_icon} | 分数: {r.get('score', 'N/A')}/100")
+                    lines.append(f"状态: {status_icon} | 评级: {grade}")
                     lines.append("")
 
                     report = r.get("report", {})
@@ -383,7 +392,8 @@ class HistoryPage(ScrollArea):
             # 单图审核
             report = data.get("report", {})
             status_icon = {"pass": "", "warning": "", "fail": ""}.get(report.get("status"), "?")
-            lines.append(f"【审核结果】评分: {report.get('score', 0)}/100 | 状态: {status_icon}")
+            grade = grade_map.get(report.get("status"), "?")
+            lines.append(f"【审核结果】评级: {grade} | 状态: {status_icon}")
             lines.append("")
 
             # 摘要
@@ -571,10 +581,9 @@ class HistoryPage(ScrollArea):
                 "## 批量审核摘要",
                 "",
                 f"- 总数: {summary.get('total', 0)}",
-                f"- 通过: {summary.get('pass_count', 0)}",
-                f"- 警告: {summary.get('warning_count', 0)}",
-                f"- 失败: {summary.get('fail_count', 0)}",
-                f"- 平均分: {summary.get('average_score', 0):.1f}",
+                f"- 优: {summary.get('pass_count', 0)}",
+                f"- 良: {summary.get('warning_count', 0)}",
+                f"- 差: {summary.get('fail_count', 0)}",
                 "",
             ])
 
@@ -586,7 +595,9 @@ class HistoryPage(ScrollArea):
                 report = r.get("report", {})
                 if report:
                     status_map = {"pass": " 通过", "warning": " 需修改", "fail": " 不通过", "error": " 错误"}
-                    lines.append(f"**评分**: {report.get('score', 0)}/100")
+                    grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
+                    grade = grade_map.get(r.get("status"), "?")
+                    lines.append(f"**评级**: {grade}")
                     lines.append(f"**状态**: {status_map.get(r.get('status'), r.get('status', '-'))}")
                     lines.append("")
 
@@ -721,8 +732,10 @@ class HistoryPage(ScrollArea):
             # 单图报告
             report = data.get("report", {})
             status_map = {"pass": " 通过", "warning": " 需修改", "fail": " 不通过"}
+            grade_map = {"pass": "优", "warning": "良", "fail": "差"}
+            grade = grade_map.get(report.get("status"), "?")
             lines.extend([
-                f"**评分**: {report.get('score', 0)}/100",
+                f"**评级**: {grade}",
                 f"**状态**: {status_map.get(report.get('status'), report.get('status', '-'))}",
                 "",
             ])

@@ -180,10 +180,9 @@ class AuditPage(ScrollArea):
         score_layout.setContentsMargins(20, 20, 20, 20)
 
         self.score_label = TitleLabel("--")
+        self.score_label.setStyleSheet("font-size: 32px;")
         score_layout.addWidget(self.score_label)
 
-        score_suffix = SubtitleLabel("/100")
-        score_layout.addWidget(score_suffix)
         score_layout.addStretch()
 
         self.status_badge = BodyLabel("")
@@ -525,7 +524,11 @@ class AuditPage(ScrollArea):
         self.export_md_btn.setEnabled(True)
 
         # 发送任务完成信号
-        self.task_finished.emit(True, f"审核完成，得分: {report.score}")
+        grade_map = {'pass': '优', 'warning': '良', 'fail': '差'}
+        status_map = {'pass': '通过', 'warning': '警告', 'fail': '不通过'}
+        grade = grade_map.get(report.status.value, '未知')
+        status = status_map.get(report.status.value, '未知')
+        self.task_finished.emit(True, f"审核完成，结果: {grade} ({status})")
 
         # 保存到历史
         self._save_to_history(report)
@@ -551,16 +554,19 @@ class AuditPage(ScrollArea):
 
     def _display_result(self, report):
         """显示审核结果"""
-        # 评分
-        self.score_label.setText(str(report.score))
+        # 根据状态显示等级
+        grade_styles = {
+            'pass': ('优', '#27ae60', '通过'),
+            'warning': ('良', '#f39c12', '警告'),
+            'fail': ('差', '#e74c3c', '不通过')
+        }
+        grade_text, color, status_text = grade_styles.get(report.status.value, ('--', '#95a5a6', '未知'))
+
+        # 显示等级而非分数
+        self.score_label.setText(grade_text)
+        self.score_label.setStyleSheet(f"font-size: 32px; color: {color}; font-weight: bold;")
 
         # 状态徽章
-        status_styles = {
-            'pass': ('通过', '#27ae60'),
-            'warning': ('需修改', '#f39c12'),
-            'fail': ('不通过', '#e74c3c')
-        }
-        status_text, color = status_styles.get(report.status.value, ('未知', '#95a5a6'))
         self.status_badge.setText(status_text)
         self.status_badge.setStyleSheet(f"""
             background-color: {color};
@@ -747,11 +753,13 @@ class AuditPage(ScrollArea):
     def _report_to_markdown(self, report) -> str:
         """将报告转换为Markdown - 完整版"""
         status_map = {"pass": "通过", "warning": "需修改", "fail": "不通过"}
+        grade_map = {"pass": "优", "warning": "良", "fail": "差"}
+        grade = grade_map.get(report.status.value, "未知")
 
         lines = [
             "# 品牌合规审核报告",
             "",
-            f"**评分**: {report.score}/100",
+            f"**评级**: {grade}",
             f"**状态**: {status_map.get(report.status.value, report.status.value)}",
             "",
         ]
@@ -929,8 +937,11 @@ class AuditPage(ScrollArea):
 
     def _on_streaming_result(self, result: dict, index: int, completed: int, total: int):
         """处理流式结果 - 实时更新UI"""
-        status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(result.get("status"), "?")
-        line = f"{status_icon} {result.get('file_name')} - 分数: {result.get('score', 'N/A')}"
+        status_icons = {"pass": "", "warning": "", "fail": "", "error": ""}
+        status_icon = status_icons.get(result.get("status"), "?")
+        grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
+        grade = grade_map.get(result.get("status"), "?")
+        line = f"{status_icon} {result.get('file_name')} - 评级: {grade}"
 
         # 追加到结果列表
         current_text = self.batch_result_list.toPlainText()
@@ -1033,11 +1044,8 @@ class AuditPage(ScrollArea):
         fail_count = len([r for r in results if r.get("status") == "fail"])
         error_count = len([r for r in results if r.get("status") == "error"])
 
-        scores = [r.get("score", 0) for r in results if r.get("score") is not None]
-        avg_score = sum(scores) / len(scores) if scores else 0
-
         self.batch_summary_label.setText(
-            f"总数: {total} | 通过: {pass_count} | 警告: {warning_count} | 失败: {fail_count} | 错误: {error_count} | 平均分: {avg_score:.1f}"
+            f"总数: {total} | 优: {pass_count} | 良: {warning_count} | 差: {fail_count} | 错误: {error_count}"
         )
 
         self.batch_status_label.setText("批量审核完成!")
@@ -1079,9 +1087,6 @@ class AuditPage(ScrollArea):
         warning_count = len([r for r in results if r.get("status") == "warning"])
         fail_count = len([r for r in results if r.get("status") == "fail"])
 
-        scores = [r.get("score", 0) for r in results if r.get("score") is not None]
-        avg_score = sum(scores) / len(scores) if scores else 0
-
         history_data = {
             "batch_id": batch_id,
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1092,8 +1097,7 @@ class AuditPage(ScrollArea):
                 "total": len(results),
                 "pass_count": pass_count,
                 "warning_count": warning_count,
-                "fail_count": fail_count,
-                "average_score": round(avg_score, 1)
+                "fail_count": fail_count
             },
             "results": results
         }
@@ -1115,7 +1119,7 @@ class AuditPage(ScrollArea):
             "brand_name": history_data["brand_name"],
             "file_count": len(results),
             "status": "completed",
-            "score": round(avg_score, 1),
+            "grade": "优" if pass_count > fail_count + warning_count else ("良" if warning_count >= fail_count else "差"),
         })
 
         history_list = history_list[:100]
@@ -1180,9 +1184,11 @@ class AuditPage(ScrollArea):
 
         for i, result in enumerate(self._last_batch_results, 1):
             status_icon = {"pass": "", "warning": "", "fail": "", "error": ""}.get(result.get("status"), "?")
+            grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
+            grade = grade_map.get(result.get("status"), "?")
             lines.append(f"## {i}. {result.get('file_name', '未知文件')}")
             lines.append(f"\n**状态:** {status_icon} {result.get('status', '-')}")
-            lines.append(f"**评分:** {result.get('score', 'N/A')}/100\n")
+            lines.append(f"**评级:** {grade}\n")
 
             report = result.get("report", {})
             if report:
