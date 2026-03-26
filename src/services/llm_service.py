@@ -463,6 +463,80 @@ class LLMService:
 
         return result
 
+    def test_deepseek_connection(self) -> tuple[bool, str]:
+        """
+        测试DeepSeek API连通性
+
+        Returns:
+            (success, message) 元组
+        """
+        try:
+            from langchain_openai import ChatOpenAI
+
+            if not settings.deepseek_api_key:
+                return False, "未配置DeepSeek API Key"
+
+            llm = ChatOpenAI(
+                model=settings.deepseek_model,
+                base_url=settings.deepseek_api_base,
+                api_key=settings.deepseek_api_key,
+                temperature=0.1,
+                timeout=30,
+            )
+
+            response = llm.invoke("你好，请回复'连接成功'")
+            if response and response.content:
+                return True, "连接成功"
+            return False, "响应异常"
+
+        except Exception as e:
+            error_msg = str(e)
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                return False, "API Key无效"
+            elif "timeout" in error_msg.lower():
+                return False, "连接超时"
+            elif "connection" in error_msg.lower():
+                return False, "无法连接到服务器"
+            return False, f"连接失败: {error_msg[:50]}"
+
+    def test_doubao_connection(self) -> tuple[bool, str]:
+        """
+        测试Doubao API连通性
+
+        Returns:
+            (success, message) 元组
+        """
+        try:
+            from langchain_openai import ChatOpenAI
+
+            if not settings.openai_api_key:
+                return False, "未配置Doubao API Key"
+
+            # 使用一个简单的测试请求
+            llm = ChatOpenAI(
+                model=settings.doubao_model,
+                base_url=settings.openai_api_base,
+                api_key=settings.openai_api_key,
+                temperature=0.1,
+                timeout=30,
+            )
+
+            # 发送一个简单的文本请求测试连通性
+            response = llm.invoke("测试连接")
+            if response:
+                return True, "连接成功"
+            return False, "响应异常"
+
+        except Exception as e:
+            error_msg = str(e)
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                return False, "API Key无效"
+            elif "timeout" in error_msg.lower():
+                return False, "连接超时"
+            elif "connection" in error_msg.lower():
+                return False, "无法连接到服务器"
+            return False, f"连接失败: {error_msg[:50]}"
+
 
 # 全局LLM服务实例
 llm_service = LLMService()
