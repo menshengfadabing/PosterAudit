@@ -434,7 +434,7 @@ class RulesPage(ScrollArea):
 
     def _upload_document(self):
         """上传规范文档"""
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames(
             self, "选择规范文档", "",
             "支持的文件 (*.pdf *.pptx *.ppt *.docx *.doc *.xlsx *.xls *.md *.txt);;"
             "PDF文档 (*.pdf);;"
@@ -446,17 +446,17 @@ class RulesPage(ScrollArea):
             "所有文件 (*.*)"
         )
 
-        if not file_path:
+        if not file_paths:
             return
 
-        # 从文件名提取默认品牌名（去掉扩展名）
-        file_name = Path(file_path).stem
+        # 从第一个文件名提取默认品牌名
+        file_name = Path(file_paths[0]).stem
         default_name = file_name[:20] if len(file_name) > 20 else file_name
 
         # 弹出输入对话框让用户命名
         brand_name, ok = QInputDialog.getText(
             self, "品牌命名",
-            "请输入品牌名称（留空则自动从文件名提取）:",
+            f"已选择 {len(file_paths)} 个文件，请输入品牌名称:",
             QLineEdit.EchoMode.Normal,
             default_name
         )
@@ -468,19 +468,56 @@ class RulesPage(ScrollArea):
 
         # 发送任务开始信号
         self.task_started.emit("规范文档解析")
-        self.progress_updated.emit(-1, "正在读取文档...", f"开始解析: {Path(file_path).name}")
+        self.progress_updated.emit(-1, "正在解析文档...", f"开始解析 {len(file_paths)} 个文件")
 
         # 禁用按钮，显示处理中
         self.upload_btn.setEnabled(False)
         self.upload_btn.setText("解析中...")
         self._current_brand_name = brand_name
+        self._current_files = file_paths
 
         # 后台线程解析
-        self._parse_worker = Worker(self._parse_with_progress, file_path, brand_name)
+        self._parse_worker = Worker(self._parse_multiple_files, file_paths, brand_name)
         self._parse_worker.finished_signal.connect(self._on_parse_finished)
         self._parse_worker.error_signal.connect(self._on_parse_error)
         self._parse_worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(p, m, m))
         self._parse_worker.start()
+
+    def _parse_multiple_files(self, file_paths: list, brand_name: str):
+        """解析多个文件并合并"""
+        all_texts = []
+        total = len(file_paths)
+
+        for i, file_path in enumerate(file_paths):
+            progress = int((i / total) * 80)
+            self.progress_updated.emit(progress, f"解析文件 {i+1}/{total}...", f"正在解析: {Path(file_path).name}")
+
+            rules = document_parser.parse_file(file_path, brand_name)
+            if rules.raw_text:
+                all_texts.append(f"=== 文件: {Path(file_path).name} ===\n{rules.raw_text}")
+
+        # 合并所有文本
+        combined_text = "\n\n".join(all_texts)
+        self.progress_updated.emit(80, "正在合并去重...", "调用LLM合并规范")
+
+        # 使用LLM合并去重
+        merged_rules = self._merge_rules_with_llm(combined_text, brand_name)
+
+        return merged_rules
+
+    def _merge_rules_with_llm(self, combined_text: str, brand_name: str):
+        """使用LLM合并多个文件的规范"""
+        # 如果文本太长，截取
+        max_chars = 20000
+        if len(combined_text) > max_chars:
+            combined_text = combined_text[:max_chars]
+
+        # 使用document_parser的方法解析
+        rules = document_parser._extract_rules_with_llm(combined_text, f"{brand_name}_合并")
+        rules.brand_name = brand_name
+        rules.raw_text = combined_text[:50000]  # 保留合并后的原文
+
+        return rules
 
     def _parse_with_progress(self, file_path: str, brand_name: str, progress_callback=None):
         """带进度回调的文档解析"""
