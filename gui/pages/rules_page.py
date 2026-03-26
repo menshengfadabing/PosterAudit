@@ -261,7 +261,7 @@ class RulesPage(ScrollArea):
                 lines.append(f"  说明: {rules.layout.description}")
             lines.append("")
 
-        # 次要规范 - 按分类展示
+        # 次要规范 - 按分类展示（完整）
         if hasattr(rules, 'secondary_rules') and rules.secondary_rules:
             has_structured_rules = True
             lines.append("【次要规范】")
@@ -279,15 +279,12 @@ class RulesPage(ScrollArea):
                     lines.append(f"    - {rule.name}: {rule.content}")
             lines.append("")
 
-        # 如果没有结构化规则，显示原始文本
-        if not has_structured_rules and rules.raw_text:
+        # 原始规范文本 - 始终显示完整版
+        if rules.raw_text:
             lines.append("【原始规范文本】")
             lines.append("")
-            # 截取前3000字符显示
-            text = rules.raw_text[:3000]
-            if len(rules.raw_text) > 3000:
-                text += f"\n\n... (共 {len(rules.raw_text)} 字符，已截取前3000字)"
-            lines.append(text)
+            lines.append(rules.raw_text)
+            lines.append("")
 
         return "\n".join(lines)
 
@@ -430,6 +427,12 @@ class RulesPage(ScrollArea):
                     lines.append(f"- **{rule.name}**: {rule.content}")
                 lines.append("")
 
+        # 原始规范文本 - 完整导出
+        if rules.raw_text:
+            lines.append("## 原始规范文本")
+            lines.append("")
+            lines.append(rules.raw_text)
+
         return "\n".join(lines)
 
     def _upload_document(self):
@@ -477,13 +480,18 @@ class RulesPage(ScrollArea):
         self._current_files = file_paths
 
         # 后台线程解析
-        self._parse_worker = Worker(self._parse_multiple_files, file_paths, brand_name)
+        if len(file_paths) == 1:
+            # 单文件直接解析
+            self._parse_worker = Worker(self._parse_with_progress, file_paths[0], brand_name)
+        else:
+            # 多文件合并解析
+            self._parse_worker = Worker(self._parse_multiple_files, file_paths, brand_name)
         self._parse_worker.finished_signal.connect(self._on_parse_finished)
         self._parse_worker.error_signal.connect(self._on_parse_error)
         self._parse_worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(p, m, m))
         self._parse_worker.start()
 
-    def _parse_multiple_files(self, file_paths: list, brand_name: str):
+    def _parse_multiple_files(self, file_paths: list, brand_name: str, progress_callback=None):
         """解析多个文件并合并"""
         all_texts = []
         total = len(file_paths)
