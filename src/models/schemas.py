@@ -62,7 +62,7 @@ class FontInfo(BaseModel):
     font_size: str = Field(default="", description="字体大小估算")
     font_weight: str = Field(default="", description="字重")
     font_style: str = Field(default="", description="字体风格")
-    is_forbidden: bool = Field(default=False, description="是否禁用字体")
+    is_forbidden: Optional[bool] = Field(default=False, description="是否禁用字体")
 
 
 class LayoutInfo(BaseModel):
