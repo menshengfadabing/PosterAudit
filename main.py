@@ -61,7 +61,7 @@ def main():
 
     # 设置 Fluent 主题
     from qfluentwidgets import setThemeColor, setTheme, Theme
-    setThemeColor('#0078d4')  # 微软蓝
+    setThemeColor('#1a5fb4')  # 深蓝色
     setTheme(Theme.LIGHT)
 
     # 创建主窗口

@@ -34,29 +34,13 @@ class RulesContextManager:
 
         self.rules_dir = self.data_dir / "rules"
         self._cache: dict[str, BrandRules] = {}
-        self._current_brand_id: str = "default"
+        self._current_brand_id: str = ""
 
         self._ensure_directories()
-        self._load_default_rules()
 
     def _ensure_directories(self) -> None:
         """确保目录存在"""
         self.rules_dir.mkdir(parents=True, exist_ok=True)
-
-    def _load_default_rules(self) -> None:
-        """加载默认规范配置"""
-        # 新位置：data/rules/default/current.json
-        default_path = self.rules_dir / "default" / "current.json"
-        if default_path.exists():
-            try:
-                with open(default_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
-                rules = BrandRules(**data)
-                self._cache["default"] = rules
-                logger.info(f"已加载默认规范: {rules.brand_name}")
-            except Exception as e:
-                logger.error(f"加载默认规范失败: {e}")
 
     def _parse_rules_data(self, data: dict, source: str) -> BrandRules:
         """解析规范数据"""
@@ -146,9 +130,6 @@ class RulesContextManager:
                 return rules
             except Exception as e:
                 logger.error(f"加载规范失败: {brand_id}, {e}")
-
-        if brand_id != "default" and "default" in self._cache:
-            return self._cache["default"]
 
         return None
 
