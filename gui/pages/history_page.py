@@ -68,7 +68,7 @@ class HistoryPage(ScrollArea):
         filter_label = BodyLabel("筛选:")
         filter_layout.addWidget(filter_label)
         self.filter_combo = ComboBox()
-        self.filter_combo.addItems(["全部", "通过", "需修改", "不通过"])
+        self.filter_combo.addItems(["全部", "PASS", "REVIEW", "FAIL"])
         self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(self.filter_combo)
         filter_layout.addStretch()
@@ -86,8 +86,8 @@ class HistoryPage(ScrollArea):
 
         # 报告表格
         self.history_table = TableWidget()
-        self.history_table.setColumnCount(5)
-        self.history_table.setHorizontalHeaderLabels(["时间", "品牌", "文件数", "评级", "状态"])
+        self.history_table.setColumnCount(4)
+        self.history_table.setHorizontalHeaderLabels(["时间", "品牌", "文件数", "状态"])
         self.history_table.horizontalHeader().setStretchLastSection(True)
         self.history_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.history_table.cellClicked.connect(self._on_row_clicked)
@@ -164,7 +164,7 @@ class HistoryPage(ScrollArea):
                     continue
 
         filter_status = self.filter_combo.currentText()
-        status_map = {"通过": "pass", "需修改": "warning", "不通过": "fail"}
+        status_map = {"PASS": "pass", "REVIEW": "warning", "FAIL": "fail"}
 
         for item in history_list:
             status = item.get("status", "unknown")
@@ -185,11 +185,11 @@ class HistoryPage(ScrollArea):
         self.history_table.setRowCount(len(self.report_files))
 
         status_styles = {
-            'pass': ('通过', '#27ae60'),
-            'warning': ('需修改', '#f39c12'),
-            'fail': ('不通过', '#e74c3c'),
-            'completed': ('完成', '#27ae60'),
-            'unknown': ('未知', '#95a5a6')
+            'pass': ('PASS', '#27ae60'),
+            'warning': ('REVIEW', '#f39c12'),
+            'fail': ('FAIL', '#e74c3c'),
+            'completed': ('PASS', '#27ae60'),
+            'unknown': ('-', '#95a5a6')
         }
 
         for row, file_info in enumerate(self.report_files):
@@ -197,26 +197,11 @@ class HistoryPage(ScrollArea):
             self.history_table.setItem(row, 1, QTableWidgetItem(file_info.get('brand_name', '-')))
             self.history_table.setItem(row, 2, QTableWidgetItem(str(file_info.get('file_count', 1))))
 
-            # 显示评级而非分数
             status = file_info.get('status', 'unknown')
-            grade_map = {'pass': '优', 'warning': '良', 'fail': '差', 'completed': '优', 'unknown': '-'}
-            grade_colors = {'pass': '#27ae60', 'warning': '#f39c12', 'fail': '#e74c3c', 'completed': '#27ae60', 'unknown': '#95a5a6'}
-            grade = grade_map.get(status, '-')
-            grade_item = QTableWidgetItem(grade)
-            grade_item.setForeground(QColor(grade_colors.get(status, '#95a5a6')))
-            self.history_table.setItem(row, 3, grade_item)
-
-            status_styles = {
-                'pass': ('通过', '#27ae60'),
-                'warning': ('需修改', '#f39c12'),
-                'fail': ('不通过', '#e74c3c'),
-                'completed': ('完成', '#27ae60'),
-                'unknown': ('未知', '#95a5a6')
-            }
-            status_text, status_color = status_styles.get(status, ('未知', '#95a5a6'))
+            status_text, status_color = status_styles.get(status, ('-', '#95a5a6'))
             status_item = QTableWidgetItem(status_text)
             status_item.setForeground(QColor(status_color))
-            self.history_table.setItem(row, 4, status_item)
+            self.history_table.setItem(row, 3, status_item)
 
         self.stats_label.setText(f"共 {len(self.report_files)} 条记录")
 
@@ -263,13 +248,13 @@ class HistoryPage(ScrollArea):
             self._current_full_report = None
 
     def _display_batch_summary(self, data: dict):
-        """显示批量审核摘要 - 包含详细规则检查"""
+        """显示批量审核摘要 - 同步导出报告格式"""
         summary = data.get("summary", {})
         results = data.get("results", [])
 
         lines = []
         lines.append(f"【批量审核摘要】")
-        lines.append(f"总数: {summary.get('total', 0)} | 优: {summary.get('pass_count', 0)} | 良: {summary.get('warning_count', 0)} | 差: {summary.get('fail_count', 0)}")
+        lines.append(f"总数: {summary.get('total', 0)} | PASS: {summary.get('pass_count', 0)} | REVIEW: {summary.get('warning_count', 0)} | FAIL: {summary.get('fail_count', 0)}")
         lines.append("")
 
         if results:
@@ -277,13 +262,11 @@ class HistoryPage(ScrollArea):
             lines.append("")
 
             for i, r in enumerate(results, 1):
-                status_icon_map = {"pass": "[OK]", "warning": "[WARN]", "fail": "[X]", "error": "[X]"}
-                status_icon = status_icon_map.get(r.get("status"), "[X]")
-                grade_map = {'pass': '优', 'warning': '良', 'fail': '差', 'error': '错误'}
-                grade = grade_map.get(r.get("status"), "?")
+                status_icon_map = {"pass": "[PASS]", "warning": "[REVIEW]", "fail": "[FAIL]", "error": "[ERROR]"}
+                status_label = status_icon_map.get(r.get("status"), "[?]")
 
                 lines.append(f"--- 图片 {i}: {r.get('file_name', '-')} ---")
-                lines.append(f"状态: {status_icon} | 评级: {grade}")
+                lines.append(f"状态: {status_label}")
 
                 report = r.get("report", {})
                 if r.get("status") == "error":
@@ -297,7 +280,7 @@ class HistoryPage(ScrollArea):
                     if score:
                         lines.append(f"分数: {score}")
 
-                    # 显示详细规则检查
+                    # 显示详细规则检查 - 使用导出报告格式
                     rule_checks = report.get("rule_checks", [])
                     if rule_checks:
                         # 按状态排序: fail > review > pass
@@ -309,22 +292,21 @@ class HistoryPage(ScrollArea):
                             rule_content = check.get("rule_content", "") or rule_id
                             check_status = check.get("status", "pass")
                             confidence = check.get("confidence", 0)
+                            reference = check.get("reference", "")
 
-                            # 状态图标
-                            icon_map = {"pass": "[OK]", "fail": "[X]", "review": "[?]"}
-                            icon = icon_map.get(check_status, "[?]")
-                            status_text_map = {"pass": "通过", "fail": "不合规", "review": "需复核"}
-                            status_label = status_text_map.get(check_status, check_status)
+                            # 状态标签
+                            status_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}
+                            check_status_label = status_map.get(check_status, "?")
 
-                            lines.append(f"  {icon} [{rule_id}] {rule_content}")
-                            lines.append(f"       结果: {status_label} | 置信度: {confidence:.0%}")
+                            # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
+                            lines.append(f"[{check_status_label}] {rule_id} : {rule_content} -->> {check_status_label} >> {reference}，置信度：{confidence:.2f}；")
 
                 lines.append("")
 
         self.detail_display.set_text("\n".join(lines))
 
     def _audit_to_markdown(self, report: dict) -> str:
-        """将审核结果转换为Markdown格式"""
+        """将审核结果转换为Markdown格式 - 同步导出报告格式"""
         lines = []
 
         # 评分和状态
@@ -332,14 +314,14 @@ class HistoryPage(ScrollArea):
         status = report.get("status", "unknown")
 
         status_map = {
-            "pass": ("[PASS] 通过", "#27ae60"),
-            "warning": ("[WARN] 警告", "#f39c12"),
-            "fail": ("[FAIL] 不通过", "#e74c3c"),
-            "unknown": ("[?] 未知", "#95a5a6")
+            "pass": "PASS",
+            "warning": "REVIEW",
+            "fail": "FAIL",
+            "unknown": "?"
         }
-        status_text, _ = status_map.get(status, ("[?] 未知", "#95a5a6"))
+        status_text = status_map.get(status, "?")
 
-        lines.append(f"【审核结果】 评分: {score} 分  |  状态: {status_text}")
+        lines.append(f"【审核结果】 评分: {score} 分  |  状态: [{status_text}]")
         lines.append("")
 
         # 总体评价
@@ -349,88 +331,29 @@ class HistoryPage(ScrollArea):
             lines.append(f"  {summary}")
             lines.append("")
 
-        # 规则检查清单
+        # 规则检查清单 - 使用导出报告格式
         rule_checks = report.get("rule_checks", [])
         if rule_checks:
             lines.append("【规则检查清单】")
+            lines.append("")
 
-            # 按状态分组排序: fail > review > pass
+            # 按状态排序: fail > review > pass
             status_order = {"fail": 0, "review": 1, "pass": 2}
             sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "pass"), 3))
 
             for check in sorted_checks:
                 rule_id = check.get("rule_id", "")
-                rule_content = check.get("rule_content", "") or check.get("rule_id", "")
+                rule_content = check.get("rule_content", "") or rule_id
                 check_status = check.get("status", "pass")
                 confidence = check.get("confidence", 0)
-                detail = check.get("detail", "")
+                reference = check.get("reference", "")
 
-                # 状态图标
-                if check_status == "pass":
-                    icon = "[OK]"
-                elif check_status == "fail":
-                    icon = "[X]"
-                else:
-                    icon = "[?]"
+                # 状态标签
+                status_label_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}
+                status_label = status_label_map.get(check_status, "?")
 
-                status_text_map = {"pass": "通过", "fail": "不合规", "review": "需复核"}
-                status_label = status_text_map.get(check_status, check_status)
-
-                lines.append(f"  {icon} [{rule_id}] {rule_content}")
-                lines.append(f"       结果: {status_label}  |  置信度: {confidence:.0%}")
-                if detail:
-                    lines.append(f"       说明: {detail}")
-            lines.append("")
-
-        # 检测结果摘要
-        detection = report.get("detection", {})
-        if detection:
-            lines.append("【检测结果】")
-
-            # 颜色
-            colors = detection.get("colors", [])
-            if colors:
-                color_strs = [f"{c.get('hex', '')} {c.get('name', '')} ({c.get('percent', 0):.1f}%)" for c in colors[:5]]
-                lines.append(f"  颜色: {', '.join(color_strs)}")
-
-            # Logo
-            logo = detection.get("logo", {})
-            if logo:
-                if logo.get("found"):
-                    lines.append(f"  Logo: 已检测到，位置: {logo.get('position', '未知')}，尺寸: {logo.get('size_percent', 0):.1f}%")
-                else:
-                    lines.append("  Logo: 未检测到")
-
-            # 文字
-            texts = detection.get("texts", [])
-            if texts:
-                preview = "、".join(texts[:5])
-                if len(texts) > 5:
-                    preview += f" 等{len(texts)}条"
-                lines.append(f"  文字: {preview}")
-
-            lines.append("")
-
-        # 问题列表
-        issues = report.get("issues", [])
-        if issues:
-            lines.append("【问题列表】")
-
-            severity_order = {"critical": 0, "major": 1, "minor": 2}
-            sorted_issues = sorted(issues, key=lambda x: severity_order.get(x.get("severity", "minor"), 3))
-
-            for i, issue in enumerate(sorted_issues, 1):
-                issue_type = issue.get("type", "未知")
-                severity = issue.get("severity", "minor")
-                description = issue.get("description", "")
-                suggestion = issue.get("suggestion", "")
-
-                severity_map = {"critical": "[严重]", "major": "[重要]", "minor": "[轻微]"}
-                severity_text = severity_map.get(severity, severity)
-
-                lines.append(f"  {i}. [{severity_text}][{issue_type}] {description}")
-                if suggestion:
-                    lines.append(f"     建议: {suggestion}")
+                # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
+                lines.append(f"[{status_label}] {rule_id} : {rule_content} -->> {status_label} >> {reference}，置信度：{confidence:.2f}；")
 
             lines.append("")
 
@@ -505,9 +428,9 @@ class HistoryPage(ScrollArea):
                 "## 批量审核摘要",
                 "",
                 f"- 总数: {summary.get('total', 0)}",
-                f"- 优: {summary.get('pass_count', 0)}",
-                f"- 良: {summary.get('warning_count', 0)}",
-                f"- 差: {summary.get('fail_count', 0)}",
+                f"- PASS: {summary.get('pass_count', 0)}",
+                f"- REVIEW: {summary.get('warning_count', 0)}",
+                f"- FAIL: {summary.get('fail_count', 0)}",
                 "",
             ])
 
@@ -518,11 +441,9 @@ class HistoryPage(ScrollArea):
 
                 report = r.get("report", {})
                 if report:
-                    status_map = {"pass": "[PASS] 通过", "warning": "[WARN] 需修改", "fail": "[FAIL] 不通过", "error": "[X] 错误"}
-                    grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
-                    grade = grade_map.get(r.get("status"), "?")
-                    lines.append(f"**评级**: {grade}")
-                    lines.append(f"**状态**: {status_map.get(r.get('status'), r.get('status', '-'))}")
+                    status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+                    status = status_map.get(r.get("status"), "?")
+                    lines.append(f"**状态**: {status}")
                     lines.append("")
 
                     # 规则检查清单
@@ -536,15 +457,11 @@ class HistoryPage(ScrollArea):
                         sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
 
                         for check in sorted_checks:
-                            status = check.get("status", "review")
-                            if status == "pass":
-                                icon = "[OK]"
-                            else:
-                                icon = "[X]"
-                            result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
-                            result = result_map.get(status, status.upper())
+                            check_status = check.get("status", "review")
+                            status_label_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "REVIEW"}
+                            status_label = status_label_map.get(check_status, check_status.upper())
                             confidence = check.get("confidence", 0)
-                            lines.append(f"[{icon}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {result} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
+                            lines.append(f"[{status_label}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {status_label} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
                         lines.append("")
 
                 lines.append("---")
@@ -553,12 +470,10 @@ class HistoryPage(ScrollArea):
         elif "report" in data:
             # 单图报告
             report = data.get("report", {})
-            status_map = {"pass": "[PASS] 通过", "warning": "[WARN] 需修改", "fail": "[FAIL] 不通过"}
-            grade_map = {"pass": "优", "warning": "良", "fail": "差"}
-            grade = grade_map.get(report.get("status"), "?")
+            status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL"}
+            status = status_map.get(report.get("status"), "?")
             lines.extend([
-                f"**评级**: {grade}",
-                f"**状态**: {status_map.get(report.get('status'), report.get('status', '-'))}",
+                f"**状态**: {status}",
                 "",
             ])
 
@@ -573,15 +488,11 @@ class HistoryPage(ScrollArea):
                 sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
 
                 for check in sorted_checks:
-                    status = check.get("status", "review")
-                    if status == "pass":
-                        icon = "[OK]"
-                    else:
-                        icon = "[X]"
-                    result_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "WARN"}
-                    result = result_map.get(status, status.upper())
+                    check_status = check.get("status", "review")
+                    status_label_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW", "warn": "REVIEW"}
+                    status_label = status_label_map.get(check_status, check_status.upper())
                     confidence = check.get("confidence", 0)
-                    lines.append(f"[{icon}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {result} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
+                    lines.append(f"[{status_label}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {status_label} >> {check.get('reference', '')}，置信度：{confidence:.2f}；")
                 lines.append("")
 
         return "\n".join(lines)

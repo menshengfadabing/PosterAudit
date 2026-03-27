@@ -83,10 +83,10 @@ class MainWindow(FluentWindow):
         self.switchTo(self.auditPage)
 
     def _apply_responsive_style(self):
-        """应用响应式样式"""
+        """应用响应式样式 - 字体固定大小，布局等比例缩放"""
         scale = responsive.scale
-        # 基础字体调大
-        base_font = max(14, int(16 * scale))
+        # 固定字体大小，不再随 scale 变化
+        base_font = 16  # 固定基础字体大小
         radius = int(self.BORDER_RADIUS * scale)
 
         # 设置全局字体
@@ -94,29 +94,29 @@ class MainWindow(FluentWindow):
         font.setPointSize(base_font)
         QApplication.instance().setFont(font)
 
-        # 设置全局样式表 - 响应式字体和间距
+        # 设置全局样式表 - 固定字体大小，响应式间距和圆角
         # 注意：保留 StackedWidget 的圆角样式
         style = f"""
             QWidget {{
                 font-size: {base_font}px;
             }}
             TitleLabel {{
-                font-size: {max(20, int(30 * scale))}px;
+                font-size: 24px;
                 font-weight: bold;
             }}
             SubtitleLabel {{
-                font-size: {max(16, int(22 * scale))}px;
+                font-size: 20px;
                 font-weight: 500;
             }}
             StrongBodyLabel {{
-                font-size: {max(14, int(17 * scale))}px;
+                font-size: 18px;
                 font-weight: 600;
             }}
             BodyLabel {{
                 font-size: {base_font}px;
             }}
             CaptionLabel {{
-                font-size: {max(12, int(13 * scale))}px;
+                font-size: 14px;
                 color: #666;
             }}
             PrimaryPushButton {{

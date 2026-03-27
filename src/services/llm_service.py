@@ -440,6 +440,86 @@ class LLMService:
             logger.error(f"批量审核失败: {e}")
             return [self._build_error_result(f"批量审核出错: {str(e)}") for _ in images]
 
+    def audit_images_batch_stream(
+        self,
+        images: list[dict],
+        rules_checklist: list[dict] = None,
+        stream_callback=None,
+    ) -> list[dict[str, Any]]:
+        """
+        流式批量审核多张图片（单次API调用，流式输出JSON）
+
+        Args:
+            images: 图片列表，每个元素包含 {"base64": str, "format": str}
+            rules_checklist: 规则检查清单
+            stream_callback: 流式回调函数，接收每个文本块
+
+        Returns:
+            审核结果列表
+        """
+        try:
+            if not images:
+                return []
+
+            if len(images) == 1:
+                # 单张图片，使用单图流式接口
+                full_content = ""
+                for chunk in self.audit_image_stream(
+                    images[0]["base64"],
+                    images[0].get("format", "jpeg"),
+                    rules_checklist,
+                    stream_callback,
+                ):
+                    full_content += chunk
+                result = self.parse_stream_result(full_content)
+                return [result]
+
+            logger.info(f"流式批量审核: 单次API调用处理 {len(images)} 张图片")
+
+            # 格式化规则清单为文本
+            checklist_text = self._format_checklist(rules_checklist or [])
+
+            # 构建Prompt
+            system_content = BATCH_AUDIT_PROMPT.format(rules_checklist=checklist_text)
+
+            # 构建用户消息，包含多张图片
+            user_content = [{"type": "text", "text": f"审核以下{len(images)}张设计稿，输出JSON数组格式的报告。每张图片对应一个对象。"}]
+
+            for i, img in enumerate(images):
+                image_url = f"data:image/{img.get('format', 'jpeg')};base64,{img['base64']}"
+                user_content.append({
+                    "type": "text",
+                    "text": f"\n--- 图片 {i + 1} ---"
+                })
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                })
+
+            messages = [
+                SystemMessage(content=system_content),
+                HumanMessage(content=user_content),
+            ]
+
+            # 调用LLM流式API
+            logger.info("正在调用API进行流式批量审核...")
+            full_content = ""
+
+            for chunk in self.llm.stream(messages):
+                if chunk.content:
+                    text_chunk = chunk.content
+                    full_content += text_chunk
+                    if stream_callback:
+                        stream_callback(text_chunk)
+
+            # 解析结果
+            results = self._parse_batch_response(full_content, len(images))
+            return results
+
+        except Exception as e:
+            logger.error(f"流式批量审核失败: {e}")
+            return [self._build_error_result(f"批量审核出错: {str(e)}") for _ in images]
+
     def _parse_batch_response(self, content: str, expected_count: int) -> list[dict]:
         """解析批量审核响应"""
         import re

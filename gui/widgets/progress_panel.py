@@ -95,7 +95,7 @@ class ProgressPanel(QFrame):
         top_layout.addWidget(self.toggle_btn)
 
         self.cancel_btn = QPushButton("取消")
-        self.cancel_btn.setStyleSheet("background-color: #e74c3c;")
+        self.cancel_btn.setStyleSheet("background-color: #1a5fb4; color: white;")
         self.cancel_btn.setVisible(False)
         self.cancel_btn.clicked.connect(self.cancel_clicked.emit)
         top_layout.addWidget(self.cancel_btn)
