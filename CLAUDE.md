@@ -4,11 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Brand Compliance Audit Platform (品牌合规性智能审核平台) - A PySide6 desktop application that uses LLM (Doubao/Volcano Engine) to audit design materials against brand guidelines.
+Brand Compliance Audit Platform (品牌合规性智能审核平台) - A PySide6 desktop application that uses LLM to audit design materials against brand guidelines. Uses DeepSeek for document parsing and Doubao (multimodal) for image analysis.
 
 ## Common Commands
 
-### Development
 ```bash
 # Install dependencies
 uv sync
@@ -22,10 +21,7 @@ uv run python test/test_core.py
 # Run full flow test (document parsing + image audit + report generation)
 # Requires test data in data/uploads/
 uv run python test/test_full_flow.py
-```
 
-### Build & Release
-```bash
 # Package executable locally
 pyinstaller build.spec
 
@@ -41,76 +37,108 @@ git tag v1.0.0 && git push --tags
 main.py                 # Application entry point, Qt setup, font detection
 ├── gui/                # PySide6 UI layer
 │   ├── main_window.py  # QMainWindow with sidebar navigation
-│   ├── pages/          # Feature pages
-│   │   ├── settings_page.py  # API configuration
-│   │   ├── rules_page.py     # Brand rules management
-│   │   ├── audit_page.py     # Single/batch image audit
-│   │   └── history_page.py   # Audit history browser
-│   ├── widgets/        # Reusable components
-│   │   ├── image_drop_area.py  # Drag-drop image upload
-│   │   └── progress_panel.py   # Batch audit progress
-│   └── utils/
-│       └── worker.py   # QThread background task runner
+│   ├── pages/          # Feature pages (settings_page, audit_page, history_page, rules_page)
+│   ├── widgets/        # Reusable components (image_drop_area, progress_panel)
+│   └── utils/worker.py # QThread background task runner
 │
 └── src/                # Business logic layer
-    ├── models/         # Pydantic data models (schemas.py)
-    ├── services/       # Core services (singleton instances)
-    └── utils/
-        └── config.py   # Pydantic-settings configuration
+    ├── models/schemas.py    # Pydantic data models
+    ├── services/            # Core services (all singletons, exported via __init__.py)
+    └── utils/config.py      # Pydantic-settings configuration
 ```
 
-### Key Services (Singleton Pattern)
+### Key Services (Singletons)
 
-All services use global singleton instances: `llm_service`, `audit_service`, `rules_context`, `document_parser`.
+All services are singleton instances exported from `src/services/__init__.py`:
 
-- **LLMService** (`src/services/llm_service.py`): LangChain + OpenAI-compatible API. Handles single/batch image audit with token estimation and context window management.
-- **AuditService** (`src/services/audit_service.py`): Image preprocessing (compression, resize), audit orchestration. Two batch modes: concurrent API calls or merged single request. Compression presets: `high_quality`, `balanced`, `high_compression`, `no_compression`.
-- **DocumentParser** (`src/services/document_parser.py`): Extracts text from PDF (PyMuPDF), PPT (python-pptx), Word (python-docx), Excel (openpyxl/xlrd), Markdown, then uses LLM to parse into structured `BrandRules`.
-- **RulesContextManager** (`src/services/rules_context.py`): Singleton managing brand rules cache and persistence in `data/rules/`.
+- **llm_service** (`LLMService`): LangChain + OpenAI-compatible API for image audit
+  - Key methods: `audit_image()`, `audit_images_batch()`, `calculate_max_images()`, `test_doubao_connection()`, `test_deepseek_connection()`
+  - Built-in token estimation for context window management
+  - Uses `COMPRESSED_AUDIT_PROMPT` (single image) and `BATCH_AUDIT_PROMPT` (multi-image)
+
+- **audit_service** (`AuditService`): Image preprocessing and audit orchestration
+  - Key methods: `audit()`, `audit_file()`, `batch_audit_concurrent()`, `batch_audit_merged()`
+  - Handles image compression with presets: `high_quality`, `balanced`, `high_compression`, `no_compression`
+  - `preprocess_image()` compresses/resizes images before API calls
+
+- **document_parser** (`DocumentParser`): Extracts text from documents, uses LLM to parse into BrandRules
+  - Supports: PDF, PPT, PPTX, DOC, DOCX, XLS, XLSX, MD, TXT
+  - Key methods: `parse()`, `parse_file()`, `extract_text_only()`, `_extract_rules_with_llm()`
+  - Uses DeepSeek API for text-based rule extraction
+
+- **rules_context** (`RulesContextManager`): Manages brand rules cache and persistence in `data/rules/`
+  - Key methods: `get_rules()`, `add_rules()`, `get_rules_checklist()`, `get_rules_text()`, `set_current_brand()`
+  - Persists rules to `data/rules/{brand_id}/current.json`
 
 ### Dual-Model Architecture
 
-The application uses two separate LLM endpoints:
-
 1. **DeepSeek** (text-only): Parses brand guideline documents into structured rules
    - Config: `deepseek_api_key`, `deepseek_api_base`, `deepseek_model`
-   - Used by `DocumentParser._extract_rules_with_llm()`
+   - Used by `document_parser._extract_rules_with_llm()`
 
 2. **Doubao** (multimodal): Audits images against brand rules
    - Config: `openai_api_key`, `openai_api_base`, `doubao_model`
-   - Used by `LLMService.audit_image()` and `LLMService.audit_images_batch()`
+   - Used by `llm_service.audit_image()` and `llm_service.audit_images_batch()`
 
-### Batch Audit Strategies
+### Batch Audit Modes
 
-`AuditService` provides two batch modes:
+Two approaches for batch processing in `AuditService`:
 
-- **`batch_audit_concurrent()`**: Multiple parallel API calls (default `max_concurrent=5`)
-- **`batch_audit_merged()`**: Single merged request with multiple images, auto-calculates max images per request based on token limits
+1. **`batch_audit_concurrent()`**: Multiple parallel API calls (default `max_concurrent=5`)
+   - Each image gets its own API request
+   - Uses `ThreadPoolExecutor` for concurrency
+   - Supports `result_callback` for streaming results
 
-The merged mode uses `LLMService.calculate_max_images()` for dynamic batch sizing based on context window and output token limits.
+2. **`batch_audit_merged()`**: Single merged request with multiple images
+   - Auto-calculates `max_images_per_request` based on token limits
+   - Falls back to single-image audit if batch fails
+   - More efficient for small batches with good token management
 
 ### Data Flow
 
-1. **Upload brand guidelines** → DocumentParser extracts text → DeepSeek LLM parses into BrandRules → RulesContextManager stores
-2. **Audit image** → AuditService preprocesses (compress/resize) → Doubao LLM calls API with rules context → AuditReport returned
+1. **Upload brand guidelines** → DocumentParser extracts text → DeepSeek parses into BrandRules → RulesContextManager stores in `data/rules/{brand_id}/current.json`
+2. **Audit image** → AuditService preprocesses (compress/resize) → Doubao API call with rules checklist → AuditReport returned
 
-### Configuration
+### Rules Checklist System
 
-- Environment variables via `.env` file (see `.env.example`)
-- Required: `OPENAI_API_KEY`, `OPENAI_API_BASE`, `DOUBAO_MODEL` for image audit
-- Required: `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `DEEPSEEK_MODEL` for document parsing
-- Data directories: `data/rules/`, `data/audit_history/`, `data/exports/`, `data/uploads/`
+The `rules_context.get_rules_checklist(brand_id)` generates a structured checklist for LLM prompts:
+- Returns list of `{rule_id, content, category, reference}` dicts
+- Rule IDs: `Rule_1`, `Rule_2`, etc.
+- Categories: Logo规范, 色彩规范, 字体规范, 文案规范, 布局规范, plus any `secondary_rules` categories
+- LLM returns `rule_checks` array matching these rule IDs
 
-## Key Data Models
+## Configuration
 
-See `src/models/schemas.py`:
-- `BrandRules`: Brand guidelines (color, logo, font, copywriting, layout rules)
-- `AuditReport`: Audit result (score, status, detection, checks, issues)
-- `DetectionResult`: Detected elements (colors, logo, texts, fonts, layout)
+Environment variables via `.env` file (see `.env.example`):
+
+```env
+# Multimodal model (image audit)
+OPENAI_API_KEY=your_key
+OPENAI_API_BASE=https://ark.cn-beijing.volces.com/api/v3
+DOUBAO_MODEL=doubao-seed-2-0-pro-260215
+
+# Text model (document parsing)
+DEEPSEEK_API_KEY=your_key
+DEEPSEEK_API_BASE=https://ark.cn-beijing.volces.com/api/v3
+DEEPSEEK_MODEL=deepseek-v3-2-251201
+
+# Optional proxy
+HTTPS_PROXY=socks5://127.0.0.1:1080
+```
+
+Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/exports/`, `data/uploads/`
+
+## Key Data Models (src/models/schemas.py)
+
+- **`BrandRules`**: Brand guidelines with `color`, `logo`, `font` (primary) and dynamic `secondary_rules` list
+- **`AuditReport`**: Audit result with `score` (0-100), `status`, `detection`, `rule_checks`, `issues`
+- **`RuleCheckItem`**: Individual rule check with `rule_id`, `status` (pass/fail/review), `confidence`, `detail`
+- **`SecondaryRule`**: Dynamic rule with `category`, `name`, `content`, `priority`
 
 ## GUI Notes
 
-- Uses PySide6-Fluent-Widgets (`qfluentwidgets`) for modern Windows-style UI components
-- QThread via `gui/utils/worker.py` for background tasks (document parsing, batch audit)
-- Navigation: sidebar QListWidget switches QStackedWidget pages
-- Chinese font auto-detection in `main.py` for cross-platform support
+- PySide6-Fluent-Widgets (`qfluentwidgets`) for Windows-style UI with `FluentWindow`
+- QThread via `gui/utils/worker.py` for background tasks (avoids blocking UI)
+- Sidebar navigation uses `addSubInterface()` and switches `QStackedWidget` pages
+- Chinese font auto-detection in `main.py`
+- Responsive scaling via `gui/utils/responsive.py`
