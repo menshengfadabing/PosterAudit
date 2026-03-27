@@ -486,7 +486,7 @@ class AuditService:
                 font_size=f.get("font_size", ""),
                 font_weight=f.get("font_weight", ""),
                 font_style=f.get("font_style", ""),
-                is_forbidden=f.get("is_forbidden", False),
+                is_forbidden=f.get("is_forbidden") if f.get("is_forbidden") is not None else False,
             ))
 
         # 构建布局信息

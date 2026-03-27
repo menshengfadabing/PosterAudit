@@ -1,15 +1,141 @@
 # 品牌合规性智能审核平台
 
-基于 PySide6 构建的桌面应用程序，用于品牌设计稿的合规性审核。
+基于 PySide6 构建的桌面应用程序，利用大语言模型（LLM）对品牌设计稿进行智能合规性审核。
 
-## 功能特性
+## 核心功能
 
-- **规范文档解析**: 支持 PDF/PPT 格式的品牌规范文档上传与智能解析
-- **品牌规范管理**: 多品牌规范存储、切换与管理
-- **智能审核**: 基于 LLM 的设计稿品牌合规审核
-- **批量审核**: 支持多图片批量审核，实时进度显示
-- **报告生成**: JSON/Markdown 格式报告导出
-- **历史记录**: 审核历史持久化存储与查询
+### 1. 规范文档智能解析
+- **多格式支持**: PDF、PPT、PPTX、DOC、DOCX、XLS、XLSX、Markdown、TXT
+- **结构化提取**: 自动识别并提取品牌规范中的核心要素
+  - **主要规范**: 色彩规范（主色、辅助色、禁用色）、Logo规范（位置、尺寸、安全间距）、字体规范（允许/禁用字体）
+  - **次要规范**: 排版规则、文案规范、品牌调性、高风险标签等
+- **多文件合并**: 支持上传多个规范文档，自动合并提取统一规则
+- **流式输出**: 实时显示 LLM 解析过程，直观了解解析进度
+
+### 2. 品牌规范管理
+- **多品牌支持**: 存储和管理多个品牌的规范文档
+- **快速切换**: 一键切换当前使用的品牌规范
+- **规范预览**: 格式化显示规范详情，支持导出 JSON/Markdown
+
+### 3. 设计稿智能审核
+- **单图审核**: 上传单张设计稿，获取详细合规报告
+- **批量审核**: 支持最多 100 张图片批量审核
+  - **并发模式**: 多个独立 API 请求并行处理，速度快
+  - **合并模式**: 单次 API 调用处理多图，节省 Token
+- **实时流式输出**: 审核过程中实时显示 AI 分析结果
+- **图片智能压缩**: 四种压缩预设（均衡/高质量/高压缩/不压缩），自动优化传输
+
+### 4. 规则检查清单
+- **逐条审核**: 将品牌规范转换为规则清单，逐条检查合规性
+- **状态标识**: 每条规则标注结果（通过/不合规/需复核）和置信度
+- **优先级排序**: 问题规则优先显示，便于快速定位
+
+### 5. 报告生成与历史
+- **多格式导出**: JSON、Markdown 格式报告
+- **历史记录**: 自动保存每次审核结果，支持筛选查询
+- **持久化存储**: 所有数据本地存储，保护隐私
+
+## 技术架构
+
+### 双模型架构
+
+本系统采用两个专用模型协同工作：
+
+| 模型 | 用途 | 特点 |
+|------|------|------|
+| **DeepSeek** (文本模型) | 规范文档解析 | 纯文本处理，从非结构化文档中提取结构化规则 |
+| **Doubao** (多模态模型) | 设计稿审核 | 视觉理解能力，分析图片中的设计元素 |
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│  规范文档上传    │     │  设计稿上传      │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│   DeepSeek      │     │    Doubao       │
+│  (文本解析)      │     │  (图像审核)      │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│  BrandRules     │◄────│  规则检查清单     │
+│  (结构化规范)    │     │  RulesChecklist │
+└─────────────────┘     └────────┬────────┘
+                                 │
+                                 ▼
+                        ┌─────────────────┐
+                        │  AuditReport    │
+                        │  (审核报告)      │
+                        └─────────────────┘
+```
+
+### 核心服务模块
+
+```
+src/services/
+├── llm_service.py      # LLM 调用服务
+│   ├── audit_image()          # 单图审核
+│   ├── audit_image_stream()   # 流式审核
+│   └── audit_images_batch()   # 批量审核
+│
+├── document_parser.py  # 文档解析服务
+│   ├── parse()                # 解析文档
+│   ├── extract_text_only()    # 提取纯文本
+│   └── _extract_rules_with_llm_stream()  # 流式解析
+│
+├── audit_service.py    # 审核编排服务
+│   ├── audit()                # 执行审核
+│   ├── preprocess_image()     # 图片预处理
+│   ├── batch_audit_concurrent()  # 并发批量
+│   └── batch_audit_merged()   # 合并批量
+│
+└── rules_context.py    # 规范上下文管理
+    ├── get_rules()            # 获取规范
+    ├── get_rules_checklist()  # 生成规则清单
+    └── add_rules()            # 添加规范
+```
+
+### 流式输出实现
+
+系统支持 LLM 输出的实时流式显示：
+
+```python
+# 流式调用示例
+for chunk in llm_service.audit_image_stream(image, rules):
+    # 实时更新UI
+    streaming_display.append_text(chunk)
+
+# 解析完整结果
+result = llm_service.parse_stream_result(full_content)
+```
+
+实现原理：
+1. 使用 LangChain 的 `stream()` 方法获取 LLM 输出流
+2. 通过 `QMetaObject.invokeMethod` 跨线程更新 Qt UI
+3. 使用 `@Slot` 装饰器注册 Qt 槽函数
+
+### 数据模型
+
+核心 Pydantic 模型定义在 `src/models/schemas.py`：
+
+```python
+class BrandRules(BaseModel):
+    """品牌规范"""
+    brand_name: str
+    color: Optional[ColorRules]      # 色彩规范
+    logo: Optional[LogoRules]        # Logo规范
+    font: Optional[FontRules]        # 字体规范
+    secondary_rules: list[SecondaryRule]  # 次要规范
+
+class AuditReport(BaseModel):
+    """审核报告"""
+    score: int                    # 合规分数 0-100
+    status: AuditStatus           # pass/warning/fail
+    rule_checks: list[RuleCheckItem]  # 规则检查清单
+    issues: list[Issue]           # 问题列表
+    summary: str                  # 总体评价
+```
 
 ## 快速开始
 
@@ -26,20 +152,21 @@ uv sync
 
 ### 3. 配置 API
 
-首次运行时，在「系统设置」→「API配置」页面配置：
-
-| 配置项 | 说明 |
-|--------|------|
-| API Key | 豆包/火山引擎 API 密钥 |
-| API 地址 | 默认: `https://ark.cn-beijing.volces.com/api/v3` |
-| 模型名称 | 默认: `doubao-seed-2-0-pro-260215` |
-
-支持通过环境变量配置，创建 `.env` 文件：
+创建 `.env` 文件：
 
 ```env
+# 多模态模型（图像审核）
 OPENAI_API_KEY=your_api_key
 OPENAI_API_BASE=https://ark.cn-beijing.volces.com/api/v3
 DOUBAO_MODEL=doubao-seed-2-0-pro-260215
+
+# 文本模型（文档解析）
+DEEPSEEK_API_KEY=your_api_key
+DEEPSEEK_API_BASE=https://ark.cn-beijing.volces.com/api/v3
+DEEPSEEK_MODEL=deepseek-v3-2-251201
+
+# 可选：代理配置
+HTTPS_PROXY=socks5://127.0.0.1:1080
 ```
 
 ### 4. 运行程序
@@ -48,136 +175,102 @@ DOUBAO_MODEL=doubao-seed-2-0-pro-260215
 uv run python main.py
 ```
 
-## 使用指南
+### 5. 运行测试
 
-### 规范管理
+```bash
+# 核心模块测试
+uv run python test/test_core.py
 
-1. 进入「系统设置」→「规范管理」
-2. 点击「上传规范文档 (PDF/PPT)」上传品牌规范文件
-3. 系统自动解析并提取规范内容（Logo、色彩、字体等）
-4. 选择规范后点击「设为当前」激活使用
-
-### 单图审核
-
-1. 进入「设计审核」→「单图审核」
-2. 选择品牌规范
-3. 拖拽或点击上传设计稿图片
-4. 点击「开始审核」，等待结果
-5. 查看审核分数、检测结果、问题列表
-6. 可导出 JSON/Markdown 报告
-
-### 批量审核
-
-1. 进入「设计审核」→「批量审核」
-2. 选择品牌规范
-3. 上传多张图片（最多 100 张）
-4. 点击「开始批量审核」
-5. 查看批量审核摘要与结果列表
-
-### 历史记录
-
-- 自动保存每次审核结果
-- 支持筛选、导出、清空操作
-- 数据持久化存储在 `data/audit_history/` 目录
+# 完整流程测试（需要测试数据）
+uv run python test/test_full_flow.py
+```
 
 ## 项目结构
 
 ```
 check_2/
-├── main.py                 # 程序入口
-├── pyproject.toml          # 项目配置与依赖
-├── src/                    # 核心业务代码
-│   ├── models/             # Pydantic 数据模型
-│   │   └── schemas.py      # BrandRules, AuditReport 等
-│   ├── services/           # 业务服务
-│   │   ├── llm_service.py      # LLM 调用服务
-│   │   ├── document_parser.py  # 文档解析服务
+├── main.py                     # 应用入口
+├── pyproject.toml              # 项目配置
+├── build.spec                  # PyInstaller 打包配置
+│
+├── src/                        # 业务逻辑层
+│   ├── models/
+│   │   └── schemas.py          # Pydantic 数据模型
+│   ├── services/
+│   │   ├── llm_service.py      # LLM 服务（流式支持）
+│   │   ├── document_parser.py  # 文档解析（流式支持）
 │   │   ├── audit_service.py    # 审核服务
-│   │   └── rules_context.py    # 规范上下文管理
-│   └── utils/              # 工具函数
-│       └── config.py       # 配置管理
-├── gui/                    # PySide6 界面
-│   ├── main_window.py      # 主窗口
-│   ├── pages/              # 功能页面
-│   │   ├── settings_page.py    # 设置页面
-│   │   ├── audit_page.py       # 审核页面
-│   │   └── history_page.py     # 历史页面
-│   ├── widgets/            # 自定义组件
-│   │   └── image_drop_area.py  # 图片拖拽上传组件
-│   └── utils/              # 界面工具
-│       └── worker.py       # 后台任务工作线程
-├── data/                   # 数据目录
-│   ├── rules/              # 品牌规范存储
-│   ├── audit_history/      # 审核历史记录
-│   ├── exports/            # 导出报告目录
-│   └── uploads/            # 上传文件目录
-├── test/                   # 测试脚本
-│   └── test_full_flow.py   # 完整流程测试
-└── docs/                   # 文档
+│   │   └── rules_context.py    # 规范管理
+│   └── utils/
+│       └── config.py           # 配置管理
+│
+├── gui/                        # UI 层
+│   ├── main_window.py          # 主窗口（FluentWindow）
+│   ├── pages/
+│   │   ├── audit_page.py       # 审核页面（流式显示）
+│   │   ├── rules_page.py       # 规范管理页面
+│   │   ├── history_page.py     # 历史记录页面
+│   │   └── settings_page.py    # 设置页面
+│   ├── widgets/
+│   │   ├── image_drop_area.py  # 图片拖拽组件
+│   │   ├── progress_panel.py   # 进度面板
+│   │   └── streaming_text_display.py  # 流式文本显示
+│   └── utils/
+│       ├── worker.py           # QThread 后台任务
+│       └── responsive.py       # 响应式布局
+│
+├── data/                       # 数据目录
+│   ├── rules/                  # 品牌规范存储
+│   ├── audit_history/          # 审核历史
+│   ├── exports/                # 导出报告
+│   └── uploads/                # 上传文件
+│
+└── test/                       # 测试脚本
+    ├── test_core.py            # 核心模块测试
+    └── test_full_flow.py       # 完整流程测试
 ```
 
 ## 技术栈
 
-- **GUI 框架**: PySide6 (Qt for Python)
-- **LLM 框架**: LangChain + OpenAI API 兼容接口
-- **数据验证**: Pydantic v2
-- **文档解析**: PyMuPDF (PDF), python-pptx (PPT)
-- **图像处理**: Pillow
-- **HTTP 客户端**: httpx (支持 SOCKS 代理)
-- **包管理**: uv
+| 类别 | 技术 | 用途 |
+|------|------|------|
+| GUI 框架 | PySide6 + qfluentwidgets | 现代化 Fluent Design 界面 |
+| LLM 框架 | LangChain + OpenAI API | 兼容火山引擎/豆包等 API |
+| 数据验证 | Pydantic v2 | 类型安全的数据模型 |
+| 文档解析 | PyMuPDF, python-pptx, python-docx | 多格式文档文本提取 |
+| 图像处理 | Pillow | 图片压缩、格式转换 |
+| HTTP 客户端 | httpx | 支持 SOCKS5 代理 |
+| 包管理 | uv | 快速依赖管理 |
 
 ## 打包发布
 
 ```bash
+# 本地打包
 pyinstaller build.spec
-```
 
-生成的可执行文件位于 `dist/` 目录。
-
-## 代理配置
-
-支持 SOCKS5 代理，在 `.env` 中配置：
-
-```env
-HTTPS_PROXY=socks5://127.0.0.1:1080
+# 跨平台发布：推送版本标签触发 GitHub Actions
+git tag v1.0.0 && git push --tags
 ```
 
 ## 常见问题
 
 ### Q: 中文显示乱码？
-
-程序会自动检测系统中的中文字体（Noto Sans CJK SC、WenQuanYi Micro Hei、Microsoft YaHei 等）。如仍有问题，请安装中文字体：
-
+程序自动检测系统中文字体。如仍有问题：
 ```bash
 # Ubuntu/Debian
 sudo apt install fonts-noto-cjk
-
-# 或
-sudo apt install fonts-wqy-microhei
 ```
 
-### Q: 上传规范解析卡住？
+### Q: 规范解析卡住？
+文档解析使用 LLM，首次解析需 1-2 分钟。流式输出会实时显示解析进度。
 
-文档解析使用 LLM，首次解析可能需要 1-2 分钟。解析过程在后台线程执行，不会阻塞界面。
+### Q: 审核失败？
+1. 检查 API Key 是否正确配置
+2. 检查网络连接，必要时配置代理
+3. 查看日志输出的错误信息
 
-### Q: 规范详情显示原始文本？
-
-当 LLM 未能成功提取结构化规范时，会显示文档的原始文本内容，仍可用于审核参考。
-
-## 开发说明
-
-### 运行测试
-
-```bash
-uv run python test/test_full_flow.py
-```
-
-### 代码风格
-
-- 使用 Python 3.12+ 语法
-- 类型注解
-- Pydantic 模型进行数据验证
-- QThread 后台执行耗时操作
+### Q: 如何添加新的规范规则？
+上传包含新规则的文档，系统会自动提取。次要规则支持动态分类（排版、文案、风格等）。
 
 ## License
 

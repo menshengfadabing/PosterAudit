@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 import uuid
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, Slot, QMetaObject, Q_ARG
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFileDialog
 from PySide6.QtGui import QColor, QPixmap
 
@@ -20,6 +20,7 @@ from qfluentwidgets import (
 from PySide6.QtWidgets import QTableWidgetItem
 
 from gui.widgets import ImageDropArea
+from gui.widgets.streaming_text_display import StreamingJsonDisplay
 from gui.utils import Worker
 from src.services.audit_service import audit_service
 from src.services.rules_context import rules_context
@@ -214,6 +215,14 @@ class AuditPage(ScrollArea):
         self.rule_checks_table.horizontalHeader().setStretchLastSection(True)
         self.rule_checks_table.setVisible(False)
         right_layout.addWidget(self.rule_checks_table, 1)
+
+        # 流式输出显示区域
+        self.streaming_display = StreamingJsonDisplay(
+            title="AI 审核输出",
+            max_height=250
+        )
+        self.streaming_display.setVisible(False)
+        right_layout.addWidget(self.streaming_display)
 
         right_layout.addStretch()
 
@@ -478,15 +487,87 @@ class AuditPage(ScrollArea):
         self.status_label.setText("正在审核（可能需要1-2分钟）...")
         self.audit_btn.setEnabled(False)
 
+        # 显示流式输出区域
+        self.streaming_display.setVisible(True)
+        self.streaming_display.start_streaming("正在调用AI分析...")
+
         # 后台任务
-        self.worker = Worker(self._run_audit, image_path, brand_id)
+        self.worker = Worker(self._run_audit_stream, image_path, brand_id)
         self.worker.finished_signal.connect(self._on_audit_finished)
         self.worker.error_signal.connect(self._on_audit_error)
         self.worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(-1, m, m))
         self.worker.start()
 
+    def _run_audit_stream(self, image_path: str, brand_id: str, progress_callback=None):
+        """执行流式审核"""
+        from src.services.llm_service import llm_service
+        from src.models.schemas import AuditReport
+
+        self.progress_updated.emit(-1, "正在调用AI分析...", "图片预处理完成")
+
+        # 预处理图片
+        import base64
+        from pathlib import Path
+        file_path = Path(image_path)
+        with open(file_path, "rb") as f:
+            image_data = f.read()
+
+        image_format = file_path.suffix.lstrip(".").lower()
+        if image_format == "jpg":
+            image_format = "jpeg"
+
+        image_base64, image_format = audit_service.preprocess_image(image_data, image_format)
+
+        # 获取品牌规范规则清单
+        rules_checklist = rules_context.get_rules_checklist(brand_id)
+
+        # 流式调用LLM
+        full_content = ""
+
+        def stream_callback(text_chunk):
+            nonlocal full_content
+            full_content += text_chunk
+            # 使用 QMetaObject.invokeMethod 在主线程更新UI
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "append_text",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, text_chunk)
+            )
+
+        try:
+            for _ in llm_service.audit_image_stream(
+                image_base64=image_base64,
+                image_format=image_format,
+                rules_checklist=rules_checklist,
+                stream_callback=stream_callback,
+            ):
+                pass  # 迭代以完成流式输出
+
+            self.progress_updated.emit(80, "正在生成报告...", "AI分析完成")
+
+            # 停止流式显示并格式化JSON
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "stop_streaming",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, "解析结果中...")
+            )
+
+            # 解析结果
+            result = llm_service.parse_stream_result(full_content)
+
+            # 构建 AuditReport
+            report = audit_service._build_report(result, rules_checklist)
+
+            return report
+
+        except Exception as e:
+            logger.error(f"流式审核失败: {e}")
+            raise
+
     def _run_audit(self, image_path: str, brand_id: str, progress_callback=None):
-        """执行审核"""
+        """执行审核（非流式，保留兼容）"""
         self.progress_updated.emit(-1, "正在调用AI分析...", "图片预处理完成")
         result = audit_service.audit_file(image_path, brand_id)
         self.progress_updated.emit(80, "正在生成报告...", "AI分析完成")
@@ -501,6 +582,10 @@ class AuditPage(ScrollArea):
         self.audit_btn.setEnabled(True)
         self.export_json_btn.setEnabled(True)
         self.export_md_btn.setEnabled(True)
+
+        # 停止流式显示
+        if self.streaming_display.is_streaming():
+            self.streaming_display.stop_streaming("生成完成")
 
         # 发送任务完成信号
         grade_map = {'pass': '优', 'warning': '良', 'fail': '差'}

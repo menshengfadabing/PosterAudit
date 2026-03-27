@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QMetaObject, Q_ARG
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QInputDialog, QLineEdit, QDialog, QLabel
 
 from qfluentwidgets import (
@@ -16,6 +16,7 @@ from src.utils.config import get_app_dir
 from src.services.rules_context import rules_context
 from src.services.document_parser import document_parser
 from gui.utils.worker import Worker
+from gui.widgets.streaming_text_display import StreamingJsonDisplay
 
 
 class RulesPage(ScrollArea):
@@ -137,6 +138,14 @@ class RulesPage(ScrollArea):
         self.rules_preview.setReadOnly(True)
         self.rules_preview.setPlaceholderText("选择品牌规范后显示详情...")
         right_layout.addWidget(self.rules_preview)
+
+        # 流式输出显示区域
+        self.streaming_display = StreamingJsonDisplay(
+            title="AI 解析输出",
+            max_height=250
+        )
+        self.streaming_display.setVisible(False)
+        right_layout.addWidget(self.streaming_display)
 
         content_layout.addWidget(right_card, 1)
 
@@ -473,26 +482,30 @@ class RulesPage(ScrollArea):
         self._current_brand_name = brand_name
         self._current_files = file_paths
 
-        # 后台线程解析
+        # 显示流式输出区域
+        self.streaming_display.setVisible(True)
+        self.streaming_display.start_streaming("正在提取文档内容...")
+
+        # 后台线程解析（使用流式版本）
         if len(file_paths) == 1:
             # 单文件直接解析
-            self._parse_worker = Worker(self._parse_with_progress, file_paths[0], brand_name)
+            self._parse_worker = Worker(self._parse_with_progress_stream, file_paths[0], brand_name)
         else:
             # 多文件合并解析
-            self._parse_worker = Worker(self._parse_multiple_files, file_paths, brand_name)
+            self._parse_worker = Worker(self._parse_multiple_files_stream, file_paths, brand_name)
         self._parse_worker.finished_signal.connect(self._on_parse_finished)
         self._parse_worker.error_signal.connect(self._on_parse_error)
         self._parse_worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(p, m, m))
         self._parse_worker.start()
 
-    def _parse_multiple_files(self, file_paths: list, brand_name: str, progress_callback=None):
-        """解析多个文件并合并 - 仅提取文本，一次性调用LLM"""
+    def _parse_multiple_files_stream(self, file_paths: list, brand_name: str, progress_callback=None):
+        """解析多个文件并合并 - 流式版本"""
         all_texts = []
         total = len(file_paths)
 
         # 仅提取文本，不调用LLM
         for i, file_path in enumerate(file_paths):
-            progress = int((i / total) * 80)
+            progress = int((i / total) * 50)
             self.progress_updated.emit(progress, f"提取文件内容 {i+1}/{total}...", f"正在提取: {Path(file_path).name}")
 
             try:
@@ -507,21 +520,122 @@ class RulesPage(ScrollArea):
 
         # 合并所有文本
         combined_text = "\n\n".join(all_texts)
-        self.progress_updated.emit(80, "正在解析合并规范...", "调用LLM解析所有规范")
+        self.progress_updated.emit(50, "正在调用AI解析规范...", "LLM流式解析中")
 
-        # 一次性调用LLM解析合并后的文本
-        merged_rules = document_parser._extract_rules_with_llm(combined_text, f"{brand_name}_合并")
-        merged_rules.brand_name = brand_name
-        merged_rules.raw_text = combined_text[:50000]
+        # 更新流式显示状态
+        QMetaObject.invokeMethod(
+            self.streaming_display,
+            "set_title",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, "AI 解析输出")
+        )
 
-        return merged_rules
+        # 流式调用LLM解析
+        full_content = ""
 
-    def _parse_with_progress(self, file_path: str, brand_name: str, progress_callback=None):
-        """带进度回调的文档解析"""
-        self.progress_updated.emit(20, "正在提取文档内容...", "")
-        result = document_parser.parse_file(file_path, brand_name)
-        self.progress_updated.emit(80, "正在解析规范结构...", "")
-        return result
+        def stream_callback(text_chunk):
+            nonlocal full_content
+            full_content += text_chunk
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "append_text",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, text_chunk)
+            )
+
+        try:
+            for _ in document_parser._extract_rules_with_llm_stream(combined_text, f"{brand_name}_合并", stream_callback):
+                pass
+
+            # 停止流式显示并格式化
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "stop_streaming",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, "解析完成")
+            )
+
+            # 解析结果
+            rules = document_parser.parse_stream_result(full_content, f"{brand_name}_合并")
+            rules.brand_name = brand_name
+            rules.raw_text = combined_text[:50000]
+
+            self.progress_updated.emit(90, "解析完成", "规范提取完成")
+            return rules
+
+        except Exception as e:
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "stop_streaming",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, f"解析失败: {str(e)}")
+            )
+            raise
+
+    def _parse_with_progress_stream(self, file_path: str, brand_name: str, progress_callback=None):
+        """带流式输出的文档解析"""
+        import io
+
+        self.progress_updated.emit(10, "正在提取文档内容...", "")
+        self.progress_updated.emit(20, "正在提取文本...", "")
+
+        # 提取文档文本
+        with open(file_path, "rb") as f:
+            file_data = f.read()
+
+        text = document_parser.extract_text_only(file_data, Path(file_path).name)
+
+        self.progress_updated.emit(40, "正在调用AI解析规范...", "LLM流式解析中")
+
+        # 更新流式显示状态
+        QMetaObject.invokeMethod(
+            self.streaming_display,
+            "set_title",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, "AI 解析输出")
+        )
+
+        # 流式调用LLM解析
+        full_content = ""
+
+        def stream_callback(text_chunk):
+            nonlocal full_content
+            full_content += text_chunk
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "append_text",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, text_chunk)
+            )
+
+        try:
+            for _ in document_parser._extract_rules_with_llm_stream(text, Path(file_path).name, stream_callback):
+                pass
+
+            # 停止流式显示并格式化
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "stop_streaming",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, "解析完成")
+            )
+
+            # 解析结果
+            rules = document_parser.parse_stream_result(full_content, Path(file_path).name)
+            rules.brand_name = brand_name
+            rules.raw_text = text[:50000]
+
+            self.progress_updated.emit(90, "解析完成", "规范提取完成")
+            return rules
+
+        except Exception as e:
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "stop_streaming",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, f"解析失败: {str(e)}")
+            )
+            raise
 
     def _on_parse_finished(self, rules):
         """解析完成"""

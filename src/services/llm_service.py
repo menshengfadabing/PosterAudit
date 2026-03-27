@@ -277,6 +277,81 @@ class LLMService:
             logger.error(f"审核失败: {e}")
             return self._build_error_result(f"审核过程出错: {str(e)}")
 
+    def audit_image_stream(
+        self,
+        image_base64: str,
+        image_format: str = "png",
+        rules_checklist: list[dict] = None,
+        stream_callback=None,
+    ):
+        """
+        流式审核单张图片
+
+        Args:
+            image_base64: Base64编码的图片数据
+            image_format: 图片格式 (png/jpeg)
+            rules_checklist: 规则检查清单
+            stream_callback: 流式回调函数，接收每个文本块
+
+        Yields:
+            每个文本块
+        """
+        full_content = ""
+
+        try:
+            # 格式化规则清单为文本
+            checklist_text = self._format_checklist(rules_checklist or [])
+
+            # 构建Prompt
+            system_content = COMPRESSED_AUDIT_PROMPT.format(rules_checklist=checklist_text)
+            image_url = f"data:image/{image_format};base64,{image_base64}"
+
+            user_content = [
+                {"type": "text", "text": "审核这张设计稿，输出JSON格式报告。"},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]
+
+            messages = [
+                SystemMessage(content=system_content),
+                HumanMessage(content=user_content),
+            ]
+
+            # 调用LLM流式API
+            logger.info("正在调用API进行流式审核...")
+
+            for chunk in self.llm.stream(messages):
+                if chunk.content:
+                    text_chunk = chunk.content
+                    full_content += text_chunk
+
+                    # 回调
+                    if stream_callback:
+                        stream_callback(text_chunk)
+
+                    yield text_chunk
+
+        except Exception as e:
+            logger.error(f"流式审核失败: {e}")
+            error_msg = f"审核过程出错: {str(e)}"
+            if stream_callback:
+                stream_callback(f"\n\n[错误] {error_msg}")
+            yield error_msg
+
+    def parse_stream_result(self, full_content: str) -> dict[str, Any]:
+        """
+        解析流式输出的完整结果
+
+        Args:
+            full_content: 流式输出的完整文本
+
+        Returns:
+            解析后的结果字典
+        """
+        result = self._parse_json_response(full_content)
+        if result is None:
+            return self._build_error_result("审核结果解析失败")
+        return self._normalize_result(result)
+
     def _format_checklist(self, checklist: list[dict]) -> str:
         """格式化规则清单为Prompt文本"""
         if not checklist:
