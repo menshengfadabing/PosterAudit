@@ -2,6 +2,18 @@
 
 from .image_drop_area import ImageDropArea
 from .progress_panel import ProgressPanel
-from .streaming_text_display import StreamingTextDisplay, StreamingJsonDisplay
+from .streaming_text_display import (
+    StreamingTextDisplay,
+    StreamingJsonDisplay,
+    StreamingRulesDisplay,
+    StreamingAuditDisplay
+)
 
-__all__ = ['ImageDropArea', 'ProgressPanel', 'StreamingTextDisplay', 'StreamingJsonDisplay']
+__all__ = [
+    'ImageDropArea',
+    'ProgressPanel',
+    'StreamingTextDisplay',
+    'StreamingJsonDisplay',
+    'StreamingRulesDisplay',
+    'StreamingAuditDisplay'
+]

@@ -1,11 +1,15 @@
 """流式文本显示组件 - 用于实时显示LLM输出"""
 
+import json
+import re
+from typing import Optional
+
 from PySide6.QtCore import Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from PySide6.QtGui import QTextCursor, QFont
 
 from qfluentwidgets import (
-    TextEdit, PushButton, CaptionLabel, FluentIcon as FIF,
+    TextEdit, PushButton, CaptionLabel, BodyLabel, FluentIcon as FIF,
     CardWidget
 )
 
@@ -20,18 +24,21 @@ class StreamingTextDisplay(CardWidget):
     - 清空文本
     - 复制内容
     - 显示/隐藏控制
+    - 导出按钮支持
     """
 
     # 文本更新信号
     text_appended = Signal(str)
     cleared = Signal()
 
-    def __init__(self, parent=None, title: str = "AI 输出", max_height: int = 300):
+    def __init__(self, parent=None, title: str = "AI 输出", max_height: int = 300, show_export: bool = False):
         super().__init__(parent)
         self._title = title
         self._max_height = max_height
         self._is_streaming = False
         self._streaming_text = ""  # 累积的流式文本
+        self._raw_json = ""  # 原始JSON数据
+        self._show_export = show_export
 
         self._init_ui()
 
@@ -91,8 +98,39 @@ class StreamingTextDisplay(CardWidget):
         """)
         layout.addWidget(self.text_edit)
 
-        # 默认隐藏
-        self.setVisible(False)
+        # 导出按钮行（可选）
+        if self._show_export:
+            export_layout = QHBoxLayout()
+            export_layout.addStretch()
+
+            self.export_json_btn = PushButton("导出JSON")
+            self.export_json_btn.setIcon(FIF.SAVE)
+            self.export_json_btn.setFixedHeight(28)
+            self.export_json_btn.setEnabled(False)
+            export_layout.addWidget(self.export_json_btn)
+
+            self.export_md_btn = PushButton("导出Markdown")
+            self.export_md_btn.setIcon(FIF.DOCUMENT)
+            self.export_md_btn.setFixedHeight(28)
+            self.export_md_btn.setEnabled(False)
+            export_layout.addWidget(self.export_md_btn)
+
+            layout.addLayout(export_layout)
+
+        # 始终可见，不隐藏
+        # self.setVisible(False)
+
+    def set_export_enabled(self, enabled: bool):
+        """设置导出按钮是否可用"""
+        if self._show_export:
+            self.export_json_btn.setEnabled(enabled)
+            self.export_md_btn.setEnabled(enabled)
+
+    def set_export_callbacks(self, json_callback, md_callback):
+        """设置导出回调"""
+        if self._show_export:
+            self.export_json_btn.clicked.connect(json_callback)
+            self.export_md_btn.clicked.connect(md_callback)
 
     @Slot(str)
     def append_text(self, text: str):
@@ -102,9 +140,6 @@ class StreamingTextDisplay(CardWidget):
         Args:
             text: 要追加的文本
         """
-        if not self.isVisible():
-            self.setVisible(True)
-
         # 累积文本
         self._streaming_text += text
 
@@ -114,8 +149,8 @@ class StreamingTextDisplay(CardWidget):
         cursor.insertText(text)
         self.text_edit.setTextCursor(cursor)
 
-        # 滚动到底部
-        self.text_edit.ensureCursorVisible()
+        # 不自动滚动，让用户可以自由查看
+        # self.text_edit.ensureCursorVisible()
 
         # 发送信号
         self.text_appended.emit(text)
@@ -136,13 +171,11 @@ class StreamingTextDisplay(CardWidget):
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.text_edit.setTextCursor(cursor)
 
-        if text and not self.isVisible():
-            self.setVisible(True)
-
     @Slot()
     def clear(self):
         """清空文本"""
         self._streaming_text = ""
+        self._raw_json = ""
         self.text_edit.clear()
         self._is_streaming = False
         self.status_label.setText("")
@@ -158,7 +191,6 @@ class StreamingTextDisplay(CardWidget):
         """
         self._is_streaming = True
         self.status_label.setText(status)
-        self.setVisible(True)
         self.clear()
 
     @Slot(str)
@@ -210,45 +242,446 @@ class StreamingJsonDisplay(StreamingTextDisplay):
     在流式输出完成后，尝试解析JSON并格式化显示
     """
 
-    def __init__(self, parent=None, title: str = "AI 输出 (JSON)", max_height: int = 300):
+    def __init__(self, parent=None, title: str = "AI 输出", max_height: int = 300):
         super().__init__(parent, title, max_height)
 
     @Slot(str)
     def stop_streaming(self, status: str = ""):
         """
-        停止流式输出，尝试格式化JSON
+        停止流式输出，尝试解析JSON
         """
         super().stop_streaming(status)
 
-        # 尝试格式化JSON
+        # 尝试解析并格式化JSON
+        self._try_format_json()
+
+    def _try_format_json(self):
+        """尝试解析并格式化JSON"""
         try:
-            import json
-            import re
-
             text = self._streaming_text.strip()
+            data = self._parse_json(text)
 
-            # 尝试直接解析
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError:
-                # 尝试提取JSON块
-                json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-                if json_match:
-                    data = json.loads(json_match.group(1))
-                else:
-                    # 尝试找到第一个 { 和最后一个 }
-                    first_brace = text.find('{')
-                    last_brace = text.rfind('}')
-                    if first_brace != -1 and last_brace != -1:
-                        data = json.loads(text[first_brace:last_brace + 1])
-                    else:
-                        return  # 无法解析，保持原样
-
-            # 格式化显示
-            formatted = json.dumps(data, ensure_ascii=False, indent=2)
-            self.text_edit.setPlainText(formatted)
-            self._streaming_text = formatted
+            if data:
+                self._raw_json = json.dumps(data, ensure_ascii=False, indent=2)
+                # 格式化显示
+                formatted = json.dumps(data, ensure_ascii=False, indent=2)
+                self.text_edit.setPlainText(formatted)
+                self._streaming_text = formatted
 
         except Exception:
             # 解析失败，保持原样
             pass
+
+    def _parse_json(self, text: str) -> Optional[dict]:
+        """解析JSON文本"""
+        # 尝试直接解析
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试提取JSON块
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试找到第一个 { 和最后一个 }
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
+        if first_brace != -1 and last_brace != -1:
+            try:
+                return json.loads(text[first_brace:last_brace + 1])
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def get_parsed_json(self) -> Optional[dict]:
+        """获取解析后的JSON对象"""
+        if self._raw_json:
+            try:
+                return json.loads(self._raw_json)
+            except:
+                pass
+        return self._parse_json(self._streaming_text)
+
+
+class StreamingRulesDisplay(StreamingTextDisplay):
+    """
+    流式规范解析显示组件
+
+    输出JSON，完成后自动转换为可读的Markdown格式
+    """
+
+    def __init__(self, parent=None, max_height: int = 400, show_export: bool = False):
+        super().__init__(parent, "AI 规范解析", max_height, show_export)
+        self.setMaximumHeight(9999)  # 不限制组件高度
+        self.text_edit.setMaximumHeight(9999)  # 不限制文本框高度
+
+    @Slot(str)
+    def stop_streaming(self, status: str = ""):
+        """
+        停止流式输出，转换为Markdown格式显示
+        """
+        super().stop_streaming(status)
+
+        # 尝试解析并转换为Markdown
+        try:
+            text = self._streaming_text.strip()
+            data = self._parse_json(text)
+
+            if data:
+                self._raw_json = json.dumps(data, ensure_ascii=False, indent=2)
+                markdown = self._rules_to_markdown(data)
+                self.text_edit.setPlainText(markdown)
+                self._streaming_text = markdown
+
+                # 切换样式为普通文本
+                self.text_edit.setStyleSheet("""
+                    TextEdit {
+                        background-color: #fafafa;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 4px;
+                        padding: 12px;
+                        font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+                        font-size: 14px;
+                        line-height: 1.6;
+                    }
+                """)
+        except Exception:
+            # 解析失败，保持原样
+            pass
+
+    def _parse_json(self, text: str) -> Optional[dict]:
+        """解析JSON文本"""
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
+        if first_brace != -1 and last_brace != -1:
+            try:
+                return json.loads(text[first_brace:last_brace + 1])
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def _rules_to_markdown(self, data: dict) -> str:
+        """将规范JSON转换为Markdown格式"""
+        lines = []
+
+        # 品牌名称
+        brand_name = data.get("brand_name", "未命名品牌")
+        lines.append(f"【品牌名称】{brand_name}")
+        lines.append("")
+
+        # === 主要规范 ===
+
+        # 色彩规范
+        color = data.get("color", {})
+        if color and (color.get("primary") or color.get("secondary") or color.get("forbidden") or color.get("additional_rules")):
+            lines.append("【色彩规范】")
+            if color.get("description"):
+                lines.append(f"  描述: {color['description']}")
+
+            if color.get("primary"):
+                p = color["primary"]
+                lines.append(f"  主色: {p.get('value', '')} ({p.get('name', '主色')})")
+
+            if color.get("secondary"):
+                for i, c in enumerate(color["secondary"], 1):
+                    lines.append(f"  辅助色{i}: {c.get('value', '')} ({c.get('name', '')})")
+
+            if color.get("forbidden"):
+                for c in color["forbidden"]:
+                    reason = f" - {c.get('reason')}" if c.get("reason") else ""
+                    lines.append(f"  禁用色: {c.get('value', '')} ({c.get('name', '')}){reason}")
+
+            if color.get("additional_rules"):
+                for rule in color["additional_rules"]:
+                    lines.append(f"  • {rule}")
+            lines.append("")
+
+        # Logo规范
+        logo = data.get("logo", {})
+        if logo and (logo.get("position_description") or logo.get("additional_rules") or logo.get("color_requirements")):
+            lines.append("【Logo规范】")
+            lines.append(f"  位置: {logo.get('position_description', '未指定')}")
+
+            if logo.get("size_range"):
+                lines.append(f"  尺寸: {logo['size_range'].get('min', 5)}% - {logo['size_range'].get('max', 15)}%")
+
+            lines.append(f"  安全间距: {logo.get('safe_margin_px', 20)}px")
+
+            if logo.get("min_display_ratio"):
+                lines.append(f"  最小显示比例: {logo['min_display_ratio']}")
+
+            if logo.get("color_requirements"):
+                lines.append("  颜色要求:")
+                for req in logo["color_requirements"]:
+                    lines.append(f"    • {req}")
+
+            if logo.get("background_requirements"):
+                lines.append("  背景要求:")
+                for req in logo["background_requirements"]:
+                    lines.append(f"    • {req}")
+
+            if logo.get("additional_rules"):
+                lines.append("  其他规则:")
+                for rule in logo["additional_rules"]:
+                    lines.append(f"    • {rule}")
+            lines.append("")
+
+        # 字体规范
+        font = data.get("font", {})
+        if font and (font.get("allowed") or font.get("forbidden") or font.get("additional_rules")):
+            lines.append("【字体规范】")
+            if font.get("allowed"):
+                lines.append(f"  允许: {', '.join(font['allowed'])}")
+            if font.get("forbidden"):
+                lines.append(f"  禁用: {', '.join(font['forbidden'])}")
+            if font.get("size_rules"):
+                for key, val in font["size_rules"].items():
+                    lines.append(f"  {key}: {val}")
+            if font.get("note"):
+                lines.append(f"  备注: {font['note']}")
+            if font.get("additional_rules"):
+                for rule in font["additional_rules"]:
+                    lines.append(f"  • {rule}")
+            lines.append("")
+
+        # === 次要规范 ===
+        secondary_rules = data.get("secondary_rules", [])
+        if secondary_rules:
+            lines.append("【次要规范】")
+
+            # 按分类分组
+            categories = {}
+            for rule in secondary_rules:
+                cat = rule.get("category", "其他")
+                if cat not in categories:
+                    categories[cat] = []
+                categories[cat].append(rule)
+
+            for category, rules_list in categories.items():
+                lines.append(f"  {category}:")
+                for rule in sorted(rules_list, key=lambda x: x.get("priority", 1)):
+                    lines.append(f"    - {rule.get('name', '')}: {rule.get('content', '')}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def get_parsed_json(self) -> Optional[dict]:
+        """获取解析后的JSON对象"""
+        if self._raw_json:
+            try:
+                return json.loads(self._raw_json)
+            except:
+                pass
+        return None
+
+
+class StreamingAuditDisplay(StreamingTextDisplay):
+    """
+    流式审核结果显示组件
+
+    输出JSON，完成后自动转换为可读的Markdown格式审核报告
+    """
+
+    def __init__(self, parent=None, max_height: int = 400, show_export: bool = False):
+        super().__init__(parent, "AI 审核输出", max_height, show_export)
+        self.setMaximumHeight(9999)  # 不限制组件高度
+        self.text_edit.setMaximumHeight(9999)  # 不限制文本框高度
+
+    @Slot(str)
+    def stop_streaming(self, status: str = ""):
+        """
+        停止流式输出，转换为Markdown格式显示
+        """
+        super().stop_streaming(status)
+
+        # 尝试解析并转换为Markdown
+        try:
+            text = self._streaming_text.strip()
+            data = self._parse_json(text)
+
+            if data:
+                self._raw_json = json.dumps(data, ensure_ascii=False, indent=2)
+                markdown = self._audit_to_markdown(data)
+                self.text_edit.setPlainText(markdown)
+                self._streaming_text = markdown
+
+                # 切换样式为普通文本
+                self.text_edit.setStyleSheet("""
+                    TextEdit {
+                        background-color: #fafafa;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 4px;
+                        padding: 12px;
+                        font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+                        font-size: 14px;
+                        line-height: 1.6;
+                    }
+                """)
+        except Exception:
+            # 解析失败，保持原样
+            pass
+
+    def _parse_json(self, text: str) -> Optional[dict]:
+        """解析JSON文本"""
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
+        if first_brace != -1 and last_brace != -1:
+            try:
+                return json.loads(text[first_brace:last_brace + 1])
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def _audit_to_markdown(self, data: dict) -> str:
+        """将审核结果JSON转换为Markdown格式"""
+        lines = []
+
+        # 评分和状态
+        score = data.get("score", 0)
+        status = data.get("status", "unknown")
+
+        status_map = {
+            "pass": ("[PASS] 通过", "#27ae60"),
+            "warning": ("[WARN] 警告", "#f39c12"),
+            "fail": ("[FAIL] 不通过", "#e74c3c"),
+            "unknown": ("[?] 未知", "#95a5a6")
+        }
+        status_text, _ = status_map.get(status, ("[?] 未知", "#95a5a6"))
+
+        lines.append(f"【审核结果】 评分: {score} 分  |  状态: {status_text}")
+        lines.append("")
+
+        # 总体评价
+        summary = data.get("summary", "")
+        if summary:
+            lines.append("【总体评价】")
+            lines.append(f"  {summary}")
+            lines.append("")
+
+        # 规则检查清单
+        rule_checks = data.get("rule_checks", [])
+        if rule_checks:
+            lines.append("【规则检查清单】")
+
+            # 按状态分组排序: fail > review > pass
+            status_order = {"fail": 0, "review": 1, "pass": 2}
+            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "pass"), 3))
+
+            for check in sorted_checks:
+                rule_id = check.get("rule_id", "")
+                rule_content = check.get("rule_content", "") or check.get("rule_id", "")
+                check_status = check.get("status", "pass")
+                confidence = check.get("confidence", 0)
+                detail = check.get("detail", "")
+
+                # 状态图标 - 使用文本标记
+                if check_status == "pass":
+                    icon = "[OK]"
+                elif check_status == "fail":
+                    icon = "[X]"
+                else:
+                    icon = "[?]"
+
+                status_text_map = {"pass": "通过", "fail": "不合规", "review": "需复核"}
+                status_label = status_text_map.get(check_status, check_status)
+
+                lines.append(f"  {icon} [{rule_id}] {rule_content}")
+                lines.append(f"       结果: {status_label}  |  置信度: {confidence:.0%}")
+                if detail:
+                    lines.append(f"       说明: {detail}")
+            lines.append("")
+
+        # 检测结果摘要
+        detection = data.get("detection", {})
+        if detection:
+            lines.append("【检测结果】")
+
+            # 颜色
+            colors = detection.get("colors", [])
+            if colors:
+                color_strs = [f"{c.get('hex', '')} {c.get('name', '')} ({c.get('percent', 0):.1f}%)" for c in colors[:5]]
+                lines.append(f"  颜色: {', '.join(color_strs)}")
+
+            # Logo
+            logo = detection.get("logo", {})
+            if logo:
+                if logo.get("found"):
+                    lines.append(f"  Logo: 已检测到，位置: {logo.get('position', '未知')}，尺寸: {logo.get('size_percent', 0):.1f}%")
+                else:
+                    lines.append("  Logo: 未检测到")
+
+            # 文字
+            texts = detection.get("texts", [])
+            if texts:
+                preview = "、".join(texts[:5])
+                if len(texts) > 5:
+                    preview += f" 等{len(texts)}条"
+                lines.append(f"  文字: {preview}")
+
+            lines.append("")
+
+        # 问题列表
+        issues = data.get("issues", [])
+        if issues:
+            lines.append("【问题列表】")
+
+            severity_order = {"critical": 0, "major": 1, "minor": 2}
+            sorted_issues = sorted(issues, key=lambda x: severity_order.get(x.get("severity", "minor"), 3))
+
+            for i, issue in enumerate(sorted_issues, 1):
+                issue_type = issue.get("type", "未知")
+                severity = issue.get("severity", "minor")
+                description = issue.get("description", "")
+                suggestion = issue.get("suggestion", "")
+
+                severity_map = {"critical": "[严重]", "major": "[重要]", "minor": "[轻微]"}
+                severity_text = severity_map.get(severity, severity)
+
+                lines.append(f"  {i}. {severity_text}[{issue_type}] {description}")
+                if suggestion:
+                    lines.append(f"     建议: {suggestion}")
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def get_parsed_json(self) -> Optional[dict]:
+        """获取解析后的JSON对象"""
+        if self._raw_json:
+            try:
+                return json.loads(self._raw_json)
+            except:
+                pass
+        return None

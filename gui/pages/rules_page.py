@@ -3,20 +3,20 @@
 import json
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QMetaObject, Q_ARG
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QInputDialog, QLineEdit, QDialog, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QDialog
 
 from qfluentwidgets import (
     ScrollArea, StrongBodyLabel, CaptionLabel, BodyLabel,
-    PushButton, PrimaryPushButton, ComboBox, TextEdit, LineEdit,
+    PushButton, PrimaryPushButton, ComboBox, LineEdit,
     InfoBar, InfoBarPosition, MessageBox, CardWidget,
-    TitleLabel, FluentIcon as FIF, IconWidget
+    TitleLabel, FluentIcon as FIF
 )
 
 from src.utils.config import get_app_dir
 from src.services.rules_context import rules_context
 from src.services.document_parser import document_parser
 from gui.utils.worker import Worker
-from gui.widgets.streaming_text_display import StreamingJsonDisplay
+from gui.widgets.streaming_text_display import StreamingRulesDisplay
 
 
 class RulesPage(ScrollArea):
@@ -107,47 +107,17 @@ class RulesPage(ScrollArea):
         left_layout.addLayout(btn_layout)
 
         left_layout.addStretch()
-        content_layout.addWidget(left_card, 1)
+        content_layout.addWidget(left_card, 2)
 
-        # 右侧：规范详情
-        right_card = CardWidget()
-        right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(20, 20, 20, 20)
-        right_layout.setSpacing(12)
-
-        detail_title = StrongBodyLabel("规范详情预览")
-        right_layout.addWidget(detail_title)
-
-        # 导出按钮行
-        export_layout = QHBoxLayout()
-        self.export_json_btn = PushButton("导出JSON")
-        self.export_json_btn.setIcon(FIF.SAVE)
-        self.export_json_btn.clicked.connect(self._export_json)
-        export_layout.addWidget(self.export_json_btn)
-
-        self.export_md_btn = PushButton("导出Markdown")
-        self.export_md_btn.setIcon(FIF.DOCUMENT)
-        self.export_md_btn.clicked.connect(self._export_markdown)
-        export_layout.addWidget(self.export_md_btn)
-
-        export_layout.addStretch()
-        right_layout.addLayout(export_layout)
-
-        # 规范预览
-        self.rules_preview = TextEdit()
-        self.rules_preview.setReadOnly(True)
-        self.rules_preview.setPlaceholderText("选择品牌规范后显示详情...")
-        right_layout.addWidget(self.rules_preview)
-
-        # 流式输出显示区域
-        self.streaming_display = StreamingJsonDisplay(
-            title="AI 解析输出",
-            max_height=250
+        # 右侧：规范详情（直接放置streaming_display，不再嵌套CardWidget）
+        self.streaming_display = StreamingRulesDisplay(
+            max_height=400,
+            show_export=True
         )
-        self.streaming_display.setVisible(False)
-        right_layout.addWidget(self.streaming_display)
-
-        content_layout.addWidget(right_card, 1)
+        self.streaming_display.set_title("规范详情")
+        self.streaming_display.set_export_callbacks(self._export_json, self._export_markdown)
+        self.streaming_display.text_edit.setPlaceholderText("请选择或上传规范文档")
+        content_layout.addWidget(self.streaming_display, 3)
 
         layout.addLayout(content_layout, 1)
 
@@ -159,7 +129,7 @@ class RulesPage(ScrollArea):
         for rule in rules_list:
             brand_id = rule.get("brand_id", "")
             brand_name = rule.get("brand_name", "未命名")
-            self.rules_combo.addItem(f"{brand_name} ({brand_id})", userData=brand_id)
+            self.rules_combo.addItem(brand_name, userData=brand_id)
 
         if self.rules_combo.count() == 0:
             self.rules_combo.addItem("暂无规范，请上传", userData="")
@@ -175,8 +145,11 @@ class RulesPage(ScrollArea):
                 # 更新信息
                 self.brand_name_label.setText(f"品牌名称: {rules.brand_name}")
 
-                # 格式化显示规范详情
-                self.rules_preview.setPlainText(self._format_rules_detail(rules))
+                # 在流式显示区域展示规范详情（Markdown格式）
+                self.streaming_display.set_title("规范详情")
+                markdown_text = self._format_rules_detail(rules)
+                self.streaming_display.set_text(markdown_text)
+                self.streaming_display.set_export_enabled(True)
 
                 rules_context.set_current_brand(brand_id)
             else:
@@ -187,7 +160,8 @@ class RulesPage(ScrollArea):
     def _clear_info(self):
         """清空信息"""
         self.brand_name_label.setText("品牌名称: --")
-        self.rules_preview.clear()
+        self.streaming_display.clear()
+        self.streaming_display.set_export_enabled(False)
 
     def _format_rules_detail(self, rules) -> str:
         """格式化规范详情显示"""
@@ -482,8 +456,7 @@ class RulesPage(ScrollArea):
         self._current_brand_name = brand_name
         self._current_files = file_paths
 
-        # 显示流式输出区域
-        self.streaming_display.setVisible(True)
+        # 开始流式输出
         self.streaming_display.start_streaming("正在提取文档内容...")
 
         # 后台线程解析（使用流式版本）
