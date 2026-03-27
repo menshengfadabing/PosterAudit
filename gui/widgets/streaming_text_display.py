@@ -565,7 +565,7 @@ class StreamingAuditDisplay(StreamingTextDisplay):
         return None
 
     def _audit_to_markdown(self, data: dict) -> str:
-        """将审核结果JSON转换为Markdown格式"""
+        """将审核结果JSON转换为Markdown格式 - 同步导出报告格式"""
         lines = []
 
         # 评分和状态
@@ -573,14 +573,14 @@ class StreamingAuditDisplay(StreamingTextDisplay):
         status = data.get("status", "unknown")
 
         status_map = {
-            "pass": ("[PASS] 通过", "#27ae60"),
-            "warning": ("[WARN] 警告", "#f39c12"),
-            "fail": ("[FAIL] 不通过", "#e74c3c"),
-            "unknown": ("[?] 未知", "#95a5a6")
+            "pass": "PASS",
+            "warning": "REVIEW",
+            "fail": "FAIL",
+            "unknown": "?"
         }
-        status_text, _ = status_map.get(status, ("[?] 未知", "#95a5a6"))
+        status_text = status_map.get(status, "?")
 
-        lines.append(f"【审核结果】 评分: {score} 分  |  状态: {status_text}")
+        lines.append(f"【审核结果】 评分: {score} 分  |  状态: [{status_text}]")
         lines.append("")
 
         # 总体评价
@@ -590,10 +590,11 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             lines.append(f"  {summary}")
             lines.append("")
 
-        # 规则检查清单
+        # 规则检查清单 - 使用导出报告格式
         rule_checks = data.get("rule_checks", [])
         if rule_checks:
             lines.append("【规则检查清单】")
+            lines.append("")
 
             # 按状态分组排序: fail > review > pass
             status_order = {"fail": 0, "review": 1, "pass": 2}
@@ -601,77 +602,21 @@ class StreamingAuditDisplay(StreamingTextDisplay):
 
             for check in sorted_checks:
                 rule_id = check.get("rule_id", "")
-                rule_content = check.get("rule_content", "") or check.get("rule_id", "")
+                rule_content = check.get("rule_content", "") or rule_id
                 check_status = check.get("status", "pass")
                 confidence = check.get("confidence", 0)
-                detail = check.get("detail", "")
+                reference = check.get("reference", "")
 
-                # 状态图标 - 使用文本标记
+                # 状态图标
                 if check_status == "pass":
-                    icon = "[OK]"
+                    status_label = "PASS"
                 elif check_status == "fail":
-                    icon = "[X]"
+                    status_label = "FAIL"
                 else:
-                    icon = "[?]"
+                    status_label = "REVIEW"
 
-                status_text_map = {"pass": "通过", "fail": "不合规", "review": "需复核"}
-                status_label = status_text_map.get(check_status, check_status)
-
-                lines.append(f"  {icon} [{rule_id}] {rule_content}")
-                lines.append(f"       结果: {status_label}  |  置信度: {confidence:.0%}")
-                if detail:
-                    lines.append(f"       说明: {detail}")
-            lines.append("")
-
-        # 检测结果摘要
-        detection = data.get("detection", {})
-        if detection:
-            lines.append("【检测结果】")
-
-            # 颜色
-            colors = detection.get("colors", [])
-            if colors:
-                color_strs = [f"{c.get('hex', '')} {c.get('name', '')} ({c.get('percent', 0):.1f}%)" for c in colors[:5]]
-                lines.append(f"  颜色: {', '.join(color_strs)}")
-
-            # Logo
-            logo = detection.get("logo", {})
-            if logo:
-                if logo.get("found"):
-                    lines.append(f"  Logo: 已检测到，位置: {logo.get('position', '未知')}，尺寸: {logo.get('size_percent', 0):.1f}%")
-                else:
-                    lines.append("  Logo: 未检测到")
-
-            # 文字
-            texts = detection.get("texts", [])
-            if texts:
-                preview = "、".join(texts[:5])
-                if len(texts) > 5:
-                    preview += f" 等{len(texts)}条"
-                lines.append(f"  文字: {preview}")
-
-            lines.append("")
-
-        # 问题列表
-        issues = data.get("issues", [])
-        if issues:
-            lines.append("【问题列表】")
-
-            severity_order = {"critical": 0, "major": 1, "minor": 2}
-            sorted_issues = sorted(issues, key=lambda x: severity_order.get(x.get("severity", "minor"), 3))
-
-            for i, issue in enumerate(sorted_issues, 1):
-                issue_type = issue.get("type", "未知")
-                severity = issue.get("severity", "minor")
-                description = issue.get("description", "")
-                suggestion = issue.get("suggestion", "")
-
-                severity_map = {"critical": "[严重]", "major": "[重要]", "minor": "[轻微]"}
-                severity_text = severity_map.get(severity, severity)
-
-                lines.append(f"  {i}. {severity_text}[{issue_type}] {description}")
-                if suggestion:
-                    lines.append(f"     建议: {suggestion}")
+                # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
+                lines.append(f"[{status_label}] {rule_id} : {rule_content} -->> {status_label} >> {reference}，置信度：{confidence:.2f}；")
 
             lines.append("")
 

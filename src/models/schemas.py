@@ -13,6 +13,7 @@ class AuditStatus(str, Enum):
     """审核状态"""
     PASS = "pass"
     WARNING = "warning"
+    REVIEW = "review"
     FAIL = "fail"
 
 

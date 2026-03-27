@@ -4,7 +4,6 @@ import base64
 import logging
 from io import BytesIO
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from PIL import Image
@@ -218,95 +217,25 @@ class AuditService:
             logger.error(f"审核失败: {e}", exc_info=True)
             raise
 
-    def batch_audit_concurrent(
-        self,
-        image_paths: list,
-        brand_id: str | None = None,
-        max_concurrent: int = 5,
-        progress_callback=None,
-        result_callback=None,
-    ) -> list:
-        """
-        并发批量审核（方案A：多个独立API请求）
-
-        Args:
-            image_paths: 图片路径列表
-            brand_id: 品牌ID
-            max_concurrent: 最大并发数
-            progress_callback: 进度回调函数 (completed, total, message)
-            result_callback: 单条结果回调函数 (result) - 用于流式返回
-
-        Returns:
-            审核结果列表
-        """
-        import time
-
-        results = [None] * len(image_paths)
-        total = len(image_paths)
-        start_time = time.time()
-
-        logger.info(f"开始并发批量审核: {total}张图片, 最大并发数: {max_concurrent}")
-
-        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-            submit_time = time.time()
-            future_to_index = {
-                executor.submit(self.audit_file, path, brand_id): i
-                for i, path in enumerate(image_paths)
-            }
-            logger.info(f"所有任务已提交，耗时: {time.time() - submit_time:.2f}秒")
-
-            completed = 0
-            for future in as_completed(future_to_index):
-                index = future_to_index[future]
-                try:
-                    report = future.result()
-                    results[index] = {
-                        "file_name": Path(image_paths[index]).name,
-                        "status": "success",
-                        "report": report
-                    }
-                except Exception as e:
-                    logger.error(f"审核失败 [{image_paths[index]}]: {e}")
-                    results[index] = {
-                        "file_name": Path(image_paths[index]).name,
-                        "status": "error",
-                        "error": str(e)
-                    }
-
-                completed += 1
-                elapsed = time.time() - start_time
-                logger.info(f"进度: {completed}/{total}, 已耗时: {elapsed:.1f}秒")
-
-                # 流式返回单条结果
-                if result_callback:
-                    result_callback(results[index], index, completed, total)
-
-                if progress_callback:
-                    progress_callback(completed, total, f"已完成 {completed}/{total}")
-
-        total_time = time.time() - start_time
-        avg_time = total_time / total if total > 0 else 0
-        logger.info(f"并发批量审核完成: {completed}/{total}, 总耗时: {total_time:.1f}秒, 平均每张: {avg_time:.1f}秒")
-
-        return results
-
     def batch_audit_merged(
         self,
         image_paths: list,
         brand_id: str | None = None,
         max_images_per_request: int = None,
         progress_callback=None,
+        stream_callback=None,
         result_callback=None,
     ) -> list:
         """
-        合并请求批量审核（方案B：单次API调用处理多张图片）
+        合并请求批量审核（单次API调用处理多张图片，流式输出JSON）
 
         Args:
             image_paths: 图片路径列表
             brand_id: 品牌ID
             max_images_per_request: 单次请求最大图片数（None则自动计算）
             progress_callback: 进度回调函数 (completed, total, message)
-            result_callback: 单条结果回调函数 (result) - 用于流式返回
+            stream_callback: 流式文本回调函数 (text_chunk) - 实时显示JSON
+            result_callback: 单条结果回调函数 (result, index, completed, total)
 
         Returns:
             审核结果列表
@@ -318,11 +247,12 @@ class AuditService:
 
         logger.info(f"开始合并请求批量审核: {total}张图片")
 
-        # 预处理所有图片
+        # 预处理所有图片，并流式更新进度
         images = []
         image_sizes = []
+        preprocessed_count = 0
 
-        for path in image_paths:
+        for i, path in enumerate(image_paths):
             file_path = Path(path)
             with open(file_path, "rb") as f:
                 image_data = f.read()
@@ -337,6 +267,11 @@ class AuditService:
                 image_sizes.append(img.size)
             except:
                 image_sizes.append((1920, 1080))  # 默认尺寸
+
+            # 流式更新预处理进度
+            preprocessed_count += 1
+            if progress_callback:
+                progress_callback(preprocessed_count, total, f"预处理图片 {preprocessed_count}/{total}")
 
         # 获取品牌规范
         rules_checklist = rules_context.get_rules_checklist(brand_id)
@@ -353,19 +288,28 @@ class AuditService:
 
         logger.info(f"分为 {len(batches)} 批次处理")
 
+        # 计算每张图片在总列表中的索引
+        path_to_index = {path: i for i, path in enumerate(image_paths)}
+
         for batch_idx, (batch_images, batch_path_list) in enumerate(zip(batches, batch_paths)):
             batch_start = time.time()
-            logger.info(f"处理第 {batch_idx + 1}/{len(batches)} 批，共 {len(batch_images)} 张图片")
+            batch_num = batch_idx + 1
+            total_batches = len(batches)
 
-            # 调用LLM批量审核
-            batch_results = llm_service.audit_images_batch(
+            if progress_callback:
+                progress_callback(len(results), total, f"正在审核批次 {batch_num}/{total_batches}...")
+
+            logger.info(f"处理第 {batch_num}/{total_batches} 批，共 {len(batch_images)} 张图片")
+
+            # 调用LLM流式批量审核
+            batch_results = llm_service.audit_images_batch_stream(
                 images=batch_images,
                 rules_checklist=rules_checklist,
-                progress_callback=None,
+                stream_callback=stream_callback,
             )
 
             batch_time = time.time() - batch_start
-            logger.info(f"批次 {batch_idx + 1} 完成，耗时: {batch_time:.1f}秒")
+            logger.info(f"批次 {batch_num} 完成，耗时: {batch_time:.1f}秒")
 
             # 检查是否有有效结果（如果全部失败则回退到单图审核）
             has_valid_result = any(
@@ -374,8 +318,8 @@ class AuditService:
             )
 
             if not has_valid_result and len(batch_images) > 1:
-                logger.warning(f"批次 {batch_idx + 1} 合并请求全部失败，回退到并发单图审核")
-                # 回退到并发单图审核
+                logger.warning(f"批次 {batch_num} 合并请求全部失败，回退到单图审核")
+                # 回退到单图审核
                 for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
                     try:
                         # 单独审核每张图片
@@ -391,9 +335,10 @@ class AuditService:
                             "report": report
                         }
                         results.append(result_item)
-                        # 流式返回
+                        # 流式返回，使用正确的索引
                         if result_callback:
-                            result_callback(result_item, len(results), len(results), total)
+                            idx = path_to_index.get(path, len(results) - 1)
+                            result_callback(result_item, idx, len(results), total)
                     except Exception as e:
                         logger.error(f"单图审核失败 [{path}]: {e}")
                         result_item = {
@@ -403,7 +348,8 @@ class AuditService:
                         }
                         results.append(result_item)
                         if result_callback:
-                            result_callback(result_item, len(results), len(results), total)
+                            idx = path_to_index.get(path, len(results) - 1)
+                            result_callback(result_item, idx, len(results), total)
             else:
                 # 转换结果格式
                 for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
@@ -415,9 +361,10 @@ class AuditService:
                             "report": report
                         }
                         results.append(result_item)
-                        # 流式返回
+                        # 流式返回，使用正确的索引
                         if result_callback:
-                            result_callback(result_item, len(results), len(results), total)
+                            idx = path_to_index.get(path, len(results) - 1)
+                            result_callback(result_item, idx, len(results), total)
                     except Exception as e:
                         logger.error(f"结果转换失败 [{path}]: {e}")
                         result_item = {
@@ -427,28 +374,16 @@ class AuditService:
                         }
                         results.append(result_item)
                         if result_callback:
-                            result_callback(result_item, len(results), len(results), total)
+                            idx = path_to_index.get(path, len(results) - 1)
+                            result_callback(result_item, idx, len(results), total)
 
             if progress_callback:
-                completed = len(results)
-                progress_callback(completed, total, f"已完成 {completed}/{total}")
+                progress_callback(len(results), total, f"已完成 {len(results)}/{total}")
 
         total_time = time.time() - start_time
         logger.info(f"合并请求批量审核完成: 总耗时: {total_time:.1f}秒, 平均每张: {total_time/total:.1f}秒")
 
         return results
-
-    def batch_audit(
-        self,
-        image_paths: list,
-        brand_id: str | None = None,
-        max_concurrent: int = 5,
-        progress_callback=None,
-    ) -> list:
-        """
-        批量审核（默认使用并发方案，保持向后兼容）
-        """
-        return self.batch_audit_concurrent(image_paths, brand_id, max_concurrent, progress_callback)
 
     def _build_report(self, result: dict, rules_checklist: list[dict] = None) -> AuditReport:
         """从LLM结果构建审核报告"""

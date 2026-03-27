@@ -312,13 +312,14 @@ class AuditPage(ScrollArea):
             raise
 
     def _run_batch_audit(self, image_paths: list, brand_id: str, progress_callback=None):
-        """执行批量审核"""
+        """执行批量审核 - 使用合并请求，流式输出JSON"""
         import time
 
         logger.info(f"开始批量审核，共 {len(image_paths)} 张图片")
 
         total = len(image_paths)
         self._batch_results = []
+        self._accumulated_md = ""  # 累积的MD格式结果
 
         def progress_cb(completed, total, message):
             """进度回调包装"""
@@ -327,8 +328,18 @@ class AuditPage(ScrollArea):
             percent = int(completed / total * 100) if total > 0 else 0
             self.progress_updated.emit(percent, message, message)
 
+        def stream_cb(text_chunk):
+            """流式文本回调 - 实时显示JSON"""
+            # 使用 QMetaObject.invokeMethod 确保在主线程更新UI
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "append_text",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, text_chunk)
+            )
+
         def result_cb(result, index, completed, total):
-            """流式结果回调"""
+            """最终结果回调 - 转换为MD格式并累积显示"""
             if result.get("status") == "success":
                 report = result["report"]
                 formatted = {
@@ -347,15 +358,37 @@ class AuditPage(ScrollArea):
                 }
 
             self._batch_results.append(formatted)
+
+            # 格式化当前图片的MD结果
+            lines = self._format_single_result(formatted)
+            current_md = "\n".join(lines)
+
+            # 累积结果
+            if self._accumulated_md:
+                self._accumulated_md += "\n\n" + current_md
+            else:
+                self._accumulated_md = current_md
+
+            # 清空JSON流式显示，设置累积的MD结果
+            QMetaObject.invokeMethod(
+                self.streaming_display,
+                "set_text",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, self._accumulated_md)
+            )
+
+            # 发送结果信号
             self.streaming_result.emit(formatted, index, completed, total)
 
         start_time = time.time()
 
+        # 使用合并请求：单次API调用处理多张图片，流式输出JSON
         audit_service.batch_audit_merged(
             image_paths=image_paths,
             brand_id=brand_id,
             max_images_per_request=None,
             progress_callback=progress_cb,
+            stream_callback=stream_cb,
             result_callback=result_cb,
         )
 
@@ -371,26 +404,31 @@ class AuditPage(ScrollArea):
 
         # 格式化单个结果
         lines = self._format_single_result(result)
+        new_content = "\n".join(lines)
 
-        # 追加文本到流式显示
+        # 获取当前文本并追加（线程安全）
         current = self.streaming_display.get_text()
         if current and not current.endswith("\n\n"):
             current += "\n\n"
-        self.streaming_display.set_text(current + "\n".join(lines))
+
+        # 使用 QMetaObject.invokeMethod 确保在主线程更新UI
+        QMetaObject.invokeMethod(
+            self.streaming_display,
+            "set_text",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, current + new_content)
+        )
 
     def _format_single_result(self, result: dict) -> list:
-        """格式化单个审核结果为详细文本"""
+        """格式化单个审核结果 - 同步导出报告格式"""
         lines = []
 
-        grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
-        status_icon_map = {"pass": "[OK]", "warning": "[WARN]", "fail": "[X]", "error": "[X]"}
-
-        grade = grade_map.get(result.get("status"), "?")
-        status_icon = status_icon_map.get(result.get("status"), "[?]")
+        status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+        status_label = status_map.get(result.get("status"), "?")
         file_name = result.get("file_name", "未知")
 
         lines.append(f"--- 图片 {result.get('_index', '?')}: {file_name} ---")
-        lines.append(f"状态: {status_icon} | 评级: {grade}")
+        lines.append(f"状态: [{status_label}]")
 
         report = result.get("report", {})
         if result.get("status") == "error":
@@ -403,9 +441,11 @@ class AuditPage(ScrollArea):
             if score:
                 lines.append(f"分数: {score}")
 
-            # 显示规则检查清单
+            # 显示规则检查清单 - 使用导出报告格式
             rule_checks = report.get("rule_checks", [])
             if rule_checks:
+                lines.append("")
+
                 # 按状态排序: fail > review > pass
                 status_order = {"fail": 0, "review": 1, "pass": 2}
                 sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
@@ -415,15 +455,14 @@ class AuditPage(ScrollArea):
                     rule_content = check.get("rule_content", "") or rule_id
                     check_status = check.get("status", "pass")
                     confidence = check.get("confidence", 0)
+                    reference = check.get("reference", "")
 
-                    # 状态图标
-                    icon_map = {"pass": "[OK]", "fail": "[X]", "review": "[?]"}
-                    icon = icon_map.get(check_status, "[?]")
-                    status_text_map = {"pass": "通过", "fail": "不合规", "review": "需复核"}
-                    status_label = status_text_map.get(check_status, check_status)
+                    # 状态标签
+                    check_status_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}
+                    check_status_label = check_status_map.get(check_status, "?")
 
-                    lines.append(f"  {icon} [{rule_id}] {rule_content}")
-                    lines.append(f"       结果: {status_label} | 置信度: {confidence:.0%}")
+                    # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
+                    lines.append(f"[{check_status_label}] {rule_id} : {rule_content} -->> {check_status_label} >> {reference}，置信度：{confidence:.2f}；")
 
         return lines
 
@@ -450,8 +489,8 @@ class AuditPage(ScrollArea):
             self.streaming_display.stop_streaming("生成完成")
 
         # 发送任务完成信号
-        grade_map = {'pass': '优', 'warning': '良', 'fail': '差'}
-        grade = grade_map.get(report.status.value, '未知')
+        grade_map = {'pass': 'PASS', 'warning': 'REVIEW', 'fail': 'FAIL'}
+        grade = grade_map.get(report.status.value, '?')
         self.task_finished.emit(True, f"审核完成，结果: {grade}")
 
         # 保存到历史
@@ -477,7 +516,7 @@ class AuditPage(ScrollArea):
         # 构建完整输出（摘要 + 详细结果）
         all_lines = [
             f"【批量审核摘要】",
-            f"总数: {total} | 优: {pass_count} | 良: {warning_count} | 差: {fail_count}",
+            f"总数: {total} | PASS: {pass_count} | REVIEW: {warning_count} | FAIL: {fail_count}",
             "",
             f"【详细结果 ({total}项)】",
             ""
@@ -704,13 +743,9 @@ class AuditPage(ScrollArea):
 
     def _report_to_markdown(self, report) -> str:
         """将报告转换为Markdown"""
-        grade_map = {"pass": "优", "warning": "良", "fail": "差"}
-        grade = grade_map.get(report.status.value, "未知")
-
         lines = [
             "# 品牌合规审核报告",
             "",
-            f"**评级**: {grade}",
             f"**分数**: {report.score}",
             "",
         ]
@@ -740,10 +775,10 @@ class AuditPage(ScrollArea):
         ]
 
         for i, result in enumerate(self._last_batch_results, 1):
-            grade_map = {"pass": "优", "warning": "良", "fail": "差", "error": "错误"}
-            grade = grade_map.get(result.get("status"), "?")
+            status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+            status_label = status_map.get(result.get("status"), "?")
             lines.append(f"## {i}. {result.get('file_name', '未知文件')}")
-            lines.append(f"\n**评级:** {grade}\n")
+            lines.append(f"\n**状态:** {status_label}\n")
 
             report = result.get("report", {})
             if report:
