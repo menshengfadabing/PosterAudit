@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Brand Compliance Audit Platform (品牌合规性智能审核平台) - A PySide6 desktop application that uses LLM to audit design materials against brand guidelines. Uses DeepSeek for document parsing and Doubao (multimodal) for image analysis.
 
+**Note**: `pyproject.toml` requires Python >= 3.12, but GitHub Actions uses Python 3.11 for cross-platform builds. Local development should use 3.12+.
+
 ## Common Commands
 
 ```bash
@@ -41,7 +43,7 @@ main.py                 # Application entry point, Qt setup, font detection
 ├── gui/                # PySide6 UI layer
 │   ├── main_window.py  # QMainWindow with sidebar navigation
 │   ├── pages/          # Feature pages (settings_page, audit_page, history_page, rules_page)
-│   ├── widgets/        # Reusable components (image_drop_area, progress_panel)
+│   ├── widgets/        # Reusable components (image_drop_area, progress_panel, streaming_text_display)
 │   └── utils/worker.py # QThread background task runner
 │
 └── src/                # Business logic layer
@@ -67,7 +69,7 @@ All services are singleton instances exported from `src/services/__init__.py`:
 
 - **document_parser** (`DocumentParser`): Extracts text from documents, uses LLM to parse into BrandRules
   - Supports: PDF, PPT, PPTX, DOC, DOCX, XLS, XLSX, MD, TXT
-  - Key methods: `parse()`, `parse_file()`, `extract_text_only()`, `_extract_rules_with_llm()`
+  - Key methods: `parse()`, `parse_file()`, `extract_text_only()`, `_extract_rules_with_llm()`, `_extract_rules_with_llm_stream()`
   - Uses DeepSeek API for text-based rule extraction
 
 - **rules_context** (`RulesContextManager`): Manages brand rules cache and persistence in `data/rules/`
@@ -165,6 +167,7 @@ Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/expor
 
 - **`BrandRules`**: Brand guidelines with `color`, `logo`, `font` (primary) and dynamic `secondary_rules` list
 - **`AuditReport`**: Audit result with `score` (0-100), `status`, `detection`, `rule_checks`, `issues`
+- **`AuditStatus`**: Enum with 4 values: `pass`, `warning`, `review`, `fail`
 - **`RuleCheckItem`**: Individual rule check with `rule_id`, `status` (pass/fail/review), `confidence`, `detail`
 - **`SecondaryRule`**: Dynamic rule with `category`, `name`, `content`, `priority`
 
