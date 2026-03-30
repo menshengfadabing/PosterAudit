@@ -286,16 +286,17 @@ class HistoryPage(ScrollArea):
             '<html><head>',
             '<meta charset="utf-8">',
             '<style>',
-            'body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; }',
-            '.header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #dee2e6; }',
+            'html, body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; height: auto; }',
+            'body { display: block; box-sizing: border-box; }',
+            '.header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #dee2e6; width: 100%; box-sizing: border-box; }',
             '.score-box { margin-right: 20px; }',
             '.score-value { font-size: 24px; font-weight: bold; color: #333; }',
             '.score-label { font-size: 12px; color: #666; }',
             '.status-badge { padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; }',
-            '.summary-box { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 12px; }',
+            '.summary-box { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 12px; width: 100%; box-sizing: border-box; }',
             '.summary-title { font-weight: bold; margin-bottom: 6px; color: #333; }',
             '.summary-text { color: #555; line-height: 1.5; }',
-            'table { width: 100%; border-collapse: collapse; }',
+            'table { width: 100%; border-collapse: collapse; table-layout: auto; }',
             'th { background: #f1f3f4; padding: 8px 6px; text-align: left; font-weight: bold; border-bottom: 2px solid #dee2e6; font-size: 12px; }',
             'td { padding: 6px; border-bottom: 1px solid #eee; font-size: 12px; }',
             'tr:hover { background: #f8f9fa; }',
@@ -407,12 +408,13 @@ class HistoryPage(ScrollArea):
             '<html><head>',
             '<meta charset="utf-8">',
             '<style>',
-            'body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; }',
-            '.summary { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 12px; }',
+            'html, body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; height: auto; }',
+            'body { display: block; box-sizing: border-box; }',
+            '.summary { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 12px; width: 100%; box-sizing: border-box; }',
             '.summary-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; }',
             '.summary-stats { margin-bottom: 8px; }',
             '.overall-status { font-weight: bold; padding: 4px 12px; border-radius: 4px; color: white; }',
-            'table { width: 100%; border-collapse: collapse; margin-top: 10px; }',
+            'table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }',
             'th { background: #e9ecef; padding: 8px 6px; text-align: left; font-weight: bold; border-bottom: 2px solid #dee2e6; font-size: 12px; }',
             'td { padding: 6px; border-bottom: 1px solid #dee2e6; font-size: 12px; }',
             'tr:hover { background: #f8f9fa; }',
@@ -458,28 +460,24 @@ class HistoryPage(ScrollArea):
             score = report.get("score", 0) if report else 0
 
             rule_checks = report.get("rule_checks", []) if report else []
-            fail_rules = [c for c in rule_checks if c.get("status") == "fail"]
-            review_rules = [c for c in rule_checks if c.get("status") in ("review", "warning")]
+            fail_count_item = len([c for c in rule_checks if c.get("status") == "fail"])
+            review_count_item = len([c for c in rule_checks if c.get("status") in ("review", "warning")])
 
-            # 规则摘要
+            # 规则摘要 - 只显示数量
             summary_parts = []
-            if fail_rules:
-                summary_parts.append(f'<span style="color:#dc3545;font-weight:bold;">FAIL: {len(fail_rules)}</span>')
-            if review_rules:
-                summary_parts.append(f'<span style="color:#856404;">REVIEW: {len(review_rules)}</span>')
-            if not fail_rules and not review_rules:
+            if fail_count_item > 0:
+                summary_parts.append(f'<span style="color:#dc3545;font-weight:bold;">FAIL: {fail_count_item}</span>')
+            if review_count_item > 0:
+                summary_parts.append(f'<span style="color:#856404;">REVIEW: {review_count_item}</span>')
+            if not summary_parts:
                 summary_parts.append('<span style="color:#28a745;">全部通过</span>')
-
-            # 详细规则ID
-            detail_ids = [c.get("rule_id", "") for c in fail_rules[:3] + review_rules[:2]]
-            detail_text = ', '.join(detail_ids) if detail_ids else ""
 
             html_parts.append('<tr>')
             html_parts.append(f'<td>{i}</td>')
             html_parts.append(f'<td class="file-name">{file_name}</td>')
             html_parts.append(f'<td><span class="status-badge {status_class}">{status_label}</span></td>')
             html_parts.append(f'<td class="score">{score}</td>')
-            html_parts.append(f'<td>{" | ".join(summary_parts)}<br><span class="rule-summary">{detail_text}</span></td>')
+            html_parts.append(f'<td>{" | ".join(summary_parts)}</td>')
             html_parts.append('</tr>')
 
         html_parts.append('</table>')
