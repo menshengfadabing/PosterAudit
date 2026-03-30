@@ -377,9 +377,6 @@ class AuditPage(ScrollArea):
                 Q_ARG(str, self._accumulated_md)
             )
 
-            # 发送结果信号
-            self.streaming_result.emit(formatted, index, completed, total)
-
         start_time = time.time()
 
         # 使用合并请求：单次API调用处理多张图片，流式输出JSON
@@ -483,14 +480,21 @@ class AuditPage(ScrollArea):
         self.audit_btn.setEnabled(True)
 
         self.streaming_display.set_export_enabled(True)
+        self.streaming_display.show_expand_button(False)  # 单图审核隐藏展开按钮
 
-        # 停止流式显示
-        if self.streaming_display.is_streaming():
-            self.streaming_display.stop_streaming("生成完成")
+        # 停止流式显示（不自动转换，使用报告数据更新显示）
+        self.streaming_display._is_streaming = False
+        self.streaming_display.status_label.setText("审核完成")
+
+        # 使用报告数据生成HTML表格显示
+        report_dict = json.loads(report.to_json())
+        html = self.streaming_display._audit_to_html(report_dict)
+        text = self.streaming_display._audit_to_text(report_dict)
+        self.streaming_display.set_html(html, text)
 
         # 发送任务完成信号
-        grade_map = {'pass': 'PASS', 'warning': 'REVIEW', 'fail': 'FAIL'}
-        grade = grade_map.get(report.status.value, '?')
+        grade_map = {'pass': 'PASS', 'review': 'REVIEW', 'fail': 'FAIL'}
+        grade = grade_map.get(report.status.value, 'REVIEW')
         self.task_finished.emit(True, f"审核完成，结果: {grade}")
 
         # 保存到历史
@@ -507,29 +511,48 @@ class AuditPage(ScrollArea):
         self.progress_bar.setVisible(False)
         self.audit_btn.setEnabled(True)
 
-        # 计算摘要
+        # 计算摘要 - 支持 pass/review/fail 状态
         total = len(results)
         pass_count = len([r for r in results if r.get("status") == "pass"])
-        warning_count = len([r for r in results if r.get("status") == "warning"])
+        review_count = len([r for r in results if r.get("status") in ("review", "warning")])
         fail_count = len([r for r in results if r.get("status") == "fail"])
+        error_count = len([r for r in results if r.get("status") == "error"])
 
-        # 构建完整输出（摘要 + 详细结果）
-        all_lines = [
-            f"【批量审核摘要】",
-            f"总数: {total} | PASS: {pass_count} | REVIEW: {warning_count} | FAIL: {fail_count}",
-            "",
-            f"【详细结果 ({total}项)】",
-            ""
-        ]
+        # 计算整体状态：fail > review > pass
+        if fail_count > 0 or error_count > 0:
+            overall_status = "FAIL"
+        elif review_count > 0:
+            overall_status = "REVIEW"
+        else:
+            overall_status = "PASS"
 
-        # 添加每个结果的详细信息
-        for i, result in enumerate(results, 1):
-            result["_index"] = i
-            all_lines.extend(self._format_single_result(result))
-            all_lines.append("")
+        # 使用表格格式显示
+        html_content = self._format_batch_results_html(
+            results, total, pass_count, review_count, fail_count, error_count, overall_status
+        )
 
-        self.streaming_display.set_text("\n".join(all_lines))
-        self.streaming_display.stop_streaming("批量审核完成")
+        # 生成纯文本版本用于复制
+        text_content = self._format_batch_results_text(
+            results, total, pass_count, review_count, fail_count, error_count, overall_status
+        )
+
+        self.streaming_display.set_html(html_content, text_content)
+        self.streaming_display.status_label.setText("批量审核完成")
+        self.streaming_display._is_streaming = False
+
+        # 存储批量数据并显示展开按钮
+        batch_data = {
+            "results": results,
+            "summary": {
+                "total": total,
+                "pass_count": pass_count,
+                "review_count": review_count,
+                "fail_count": fail_count
+            },
+            "status": overall_status.lower()
+        }
+        self.streaming_display.set_batch_data(batch_data, html_content, text_content)
+        self.streaming_display.show_expand_button(True)
 
         self.status_label.setText("批量审核完成!")
 
@@ -540,7 +563,207 @@ class AuditPage(ScrollArea):
 
         # 保存批量结果
         self._last_batch_results = results
-        self._save_batch_to_history(results)
+        self._save_batch_to_history(results, overall_status.lower())
+
+    def _format_batch_results_html(self, results: list, total: int, pass_count: int,
+                                     warning_count: int, fail_count: int, error_count: int,
+                                     overall_status: str) -> str:
+        """将批量审核结果格式化为HTML表格"""
+
+        # 状态颜色映射
+        status_colors = {
+            "pass": "#28a745",
+            "warning": "#ffc107",
+            "fail": "#dc3545",
+            "error": "#6c757d"
+        }
+
+        status_labels = {
+            "pass": "PASS",
+            "warning": "REVIEW",
+            "fail": "FAIL",
+            "error": "ERROR"
+        }
+
+        overall_color = status_colors.get(overall_status.lower(), "#6c757d")
+
+        html_parts = [
+            '<!DOCTYPE html>',
+            '<html><head>',
+            '<meta charset="utf-8">',
+            '<style>',
+            'body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; }',
+            '.summary { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 16px; }',
+            '.summary-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; }',
+            '.summary-stats { display: inline-block; margin-right: 20px; }',
+            '.overall-status { font-weight: bold; padding: 4px 12px; border-radius: 4px; color: white; }',
+            'table { width: 100%; border-collapse: collapse; margin-top: 10px; }',
+            'th { background: #e9ecef; padding: 10px 8px; text-align: left; font-weight: bold; border-bottom: 2px solid #dee2e6; }',
+            'td { padding: 8px; border-bottom: 1px solid #dee2e6; vertical-align: top; }',
+            'tr:hover { background: #f8f9fa; }',
+            '.status-badge { padding: 2px 8px; border-radius: 3px; font-weight: bold; font-size: 11px; }',
+            '.status-pass { background: #d4edda; color: #155724; }',
+            '.status-review { background: #fff3cd; color: #856404; }',
+            '.status-fail { background: #f8d7da; color: #721c24; }',
+            '.status-error { background: #e2e3e5; color: #383d41; }',
+            '.rule-pass { color: #28a745; }',
+            '.rule-fail { color: #dc3545; font-weight: bold; }',
+            '.rule-review { color: #856404; }',
+            '.file-name { font-weight: bold; color: #333; }',
+            '.score { font-weight: bold; font-size: 14px; }',
+            '.rule-table { width: 100%; font-size: 12px; margin-top: 4px; }',
+            '.rule-table td { padding: 3px 4px; border: none; }',
+            '.rule-id { color: #666; width: 60px; }',
+            '.rule-content { color: #333; }',
+            '.rule-confidence { color: #888; width: 50px; text-align: right; }',
+            '</style>',
+            '</head><body>',
+        ]
+
+        # 摘要部分
+        html_parts.append('<div class="summary">')
+        html_parts.append('<div class="summary-title">【批量审核摘要】</div>')
+        html_parts.append(f'<span class="summary-stats">总数: {total}</span>')
+        html_parts.append(f'<span class="summary-stats" style="color:#28a745;">PASS: {pass_count}</span>')
+        html_parts.append(f'<span class="summary-stats" style="color:#856404;">REVIEW: {warning_count}</span>')
+        html_parts.append(f'<span class="summary-stats" style="color:#dc3545;">FAIL: {fail_count}</span>')
+        if error_count > 0:
+            html_parts.append(f'<span class="summary-stats" style="color:#6c757d;">ERROR: {error_count}</span>')
+        html_parts.append(f'<br><br>整体状态: <span class="overall-status" style="background:{overall_color};">{overall_status}</span>')
+        html_parts.append('</div>')
+
+        # 详细结果表格
+        html_parts.append('<div class="summary-title">【详细结果】</div>')
+        html_parts.append('<table>')
+        html_parts.append('<tr><th style="width:30px;">#</th><th style="width:150px;">文件名</th>'
+                         '<th style="width:60px;">状态</th><th style="width:50px;">分数</th>'
+                         '<th>规则检查 (FAIL/REVIEW)</th></tr>')
+
+        for i, result in enumerate(results, 1):
+            status = result.get("status", "error")
+            status_label = status_labels.get(status, "?")
+            # 统一 warning 为 review
+            display_status = "review" if status == "warning" else status
+            status_class = f"status-{display_status}"
+            file_name = result.get("file_name", "未知")
+
+            # 获取报告数据
+            report = result.get("report", {})
+            score = report.get("score", 0) if report else 0
+
+            # 构建规则检查摘要（只显示FAIL和REVIEW）
+            rule_checks = report.get("rule_checks", []) if report else []
+            fail_rules = [c for c in rule_checks if c.get("status") == "fail"]
+            review_rules = [c for c in rule_checks if c.get("status") in ("review", "warning")]
+
+            rule_summary_parts = []
+
+            if fail_rules:
+                rule_summary_parts.append(f'<span style="color:#dc3545;font-weight:bold;">FAIL: {len(fail_rules)}项</span>')
+            if review_rules:
+                rule_summary_parts.append(f'<span style="color:#856404;">REVIEW: {len(review_rules)}项</span>')
+            if not fail_rules and not review_rules:
+                rule_summary_parts.append('<span style="color:#28a745;">全部通过</span>')
+
+            rule_summary = ' | '.join(rule_summary_parts)
+
+            # 构建详细规则列表
+            detail_lines = []
+            for c in fail_rules[:5]:  # 最多显示5个
+                rule_id = c.get("rule_id", "")
+                detail_lines.append(f'<span class="rule-fail">[{rule_id}]</span>')
+            for c in review_rules[:3]:  # 最多显示3个
+                rule_id = c.get("rule_id", "")
+                detail_lines.append(f'<span class="rule-review">[{rule_id}]</span>')
+
+            detail_html = ' '.join(detail_lines)
+            if len(fail_rules) > 5 or len(review_rules) > 3:
+                detail_html += ' ...'
+
+            html_parts.append(f'<tr>')
+            html_parts.append(f'<td>{i}</td>')
+            html_parts.append(f'<td class="file-name">{file_name}</td>')
+            html_parts.append(f'<td><span class="status-badge {status_class}">{status_label}</span></td>')
+            html_parts.append(f'<td class="score">{score}</td>')
+            html_parts.append(f'<td>{rule_summary}<br><span style="font-size:11px;color:#666;">{detail_html}</span></td>')
+            html_parts.append(f'</tr>')
+
+        html_parts.append('</table>')
+        html_parts.append('</body></html>')
+
+        return ''.join(html_parts)
+
+    def _format_batch_results_text(self, results: list, total: int, pass_count: int,
+                                    review_count: int, fail_count: int, error_count: int,
+                                    overall_status: str) -> str:
+        """将批量审核结果格式化为纯文本"""
+        lines = []
+
+        # 状态映射
+        status_labels = {
+            "pass": "PASS",
+            "warning": "REVIEW",
+            "fail": "FAIL",
+            "error": "ERROR"
+        }
+
+        # 添加摘要
+        lines.append("【批量审核摘要】")
+        lines.append(f"总数: {total}")
+        lines.append(f"PASS: {pass_count}")
+        lines.append(f"REVIEW: {review_count}")
+        lines.append(f"FAIL: {fail_count}")
+        if error_count > 0:
+            lines.append(f"ERROR: {error_count}")
+        lines.append(f"整体状态: {overall_status}")
+        lines.append("")
+
+        # 添加详细结果
+        lines.append("【详细结果】")
+        lines.append("")
+
+        for i, result in enumerate(results, 1):
+            status = result.get("status", "error")
+            status_label = status_labels.get(status, "?")
+            file_name = result.get("file_name", "未知")
+
+            lines.append(f"--- 图片 {i}: {file_name} ---")
+            lines.append(f"状态: [{status_label}]")
+
+            report = result.get("report", {})
+            if result.get("status") == "error":
+                lines.append(f"错误: {result.get('error', '未知错误')}")
+                lines.append("")
+                continue
+
+            if report:
+                score = report.get("score", 0)
+                lines.append(f"分数: {score}")
+
+                # 显示规则检查清单
+                rule_checks = report.get("rule_checks", [])
+                if rule_checks:
+                    lines.append("")
+
+                    # 按状态排序: fail > review > pass
+                    status_order = {"fail": 0, "review": 1, "pass": 2}
+                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+
+                    for check in sorted_checks:
+                        rule_id = check.get("rule_id", "")
+                        rule_content = check.get("rule_content", "") or rule_id
+                        check_status = check.get("status", "pass")
+                        confidence = check.get("confidence", 0)
+                        reference = check.get("reference", "")
+
+                        check_status_map = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}
+                        check_status_label = check_status_map.get(check_status, "?")
+
+                        lines.append(f"[{check_status_label}] {rule_id} : {rule_content} -->> {check_status_label} >> {reference}，置信度：{confidence:.2f}；")
+
+            lines.append("")
+
+        return '\n'.join(lines)
 
     def _on_audit_error(self, error: str):
         """审核出错"""
@@ -588,27 +811,37 @@ class AuditPage(ScrollArea):
         # 更新历史索引
         self._update_history_index(history_data)
 
-    def _save_batch_to_history(self, results: list):
+    def _save_batch_to_history(self, results: list, overall_status: str = None):
         """保存批量审核结果到历史"""
         history_dir = get_app_dir() / "data" / "audit_history"
         history_dir.mkdir(parents=True, exist_ok=True)
 
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
+        # 统计状态 - 统一使用 pass/review/fail
         pass_count = len([r for r in results if r.get("status") == "pass"])
-        warning_count = len([r for r in results if r.get("status") == "warning"])
+        review_count = len([r for r in results if r.get("status") in ("review", "warning")])
         fail_count = len([r for r in results if r.get("status") == "fail"])
+
+        # 计算整体状态：fail > review > pass
+        if overall_status is None:
+            if fail_count > 0:
+                overall_status = "fail"
+            elif review_count > 0:
+                overall_status = "review"
+            else:
+                overall_status = "pass"
 
         history_data = {
             "batch_id": batch_id,
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "brand_name": self.brand_combo.currentText(),
             "file_count": len(results),
-            "status": "completed",
+            "status": overall_status,
             "summary": {
                 "total": len(results),
                 "pass_count": pass_count,
-                "warning_count": warning_count,
+                "review_count": review_count,  # 使用 review_count 而非 warning_count
                 "fail_count": fail_count
             },
             "results": results
@@ -629,23 +862,37 @@ class AuditPage(ScrollArea):
             with open(index_file, "r", encoding="utf-8") as f:
                 history_list = json.load(f)
 
+        # 统一状态值为 pass/review/fail
+        status = history_data.get("status", "review")
+        if status == "warning":
+            status = "review"
+
         entry = {
             "batch_id": history_data["batch_id"],
             "time": history_data["time"],
             "brand_name": history_data["brand_name"],
             "file_count": history_data.get("file_count", 1),
-            "status": history_data.get("status", history_data.get("report", {}).get("status", "unknown")),
+            "status": status,
         }
 
         if is_batch:
             summary = history_data.get("summary", {})
             pass_count = summary.get("pass_count", 0)
-            warning_count = summary.get("warning_count", 0)
+            review_count = summary.get("review_count", summary.get("warning_count", 0))
             fail_count = summary.get("fail_count", 0)
-            entry["grade"] = "优" if pass_count > fail_count + warning_count else ("良" if warning_count >= fail_count else "差")
+            # 根据整体状态确定等级：fail > review > pass
+            batch_status = history_data.get("status", "fail")
+            if batch_status == "warning":
+                batch_status = "review"
+            grade_map = {'pass': 'PASS', 'review': 'REVIEW', 'fail': 'FAIL'}
+            entry["grade"] = grade_map.get(batch_status, "REVIEW")
         else:
-            grade_map = {'pass': '优', 'warning': '良', 'fail': '差'}
-            entry["grade"] = grade_map.get(history_data.get("status"), "差")
+            # 单图审核
+            status = history_data.get("status", "review")
+            if status == "warning":
+                status = "review"
+            grade_map = {'pass': 'PASS', 'review': 'REVIEW', 'fail': 'FAIL'}
+            entry["grade"] = grade_map.get(status, "REVIEW")
             entry["score"] = history_data.get("score", 0)
 
         history_list.insert(0, entry)

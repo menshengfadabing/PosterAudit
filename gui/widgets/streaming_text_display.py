@@ -171,6 +171,21 @@ class StreamingTextDisplay(CardWidget):
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.text_edit.setTextCursor(cursor)
 
+    def set_html(self, html: str, plain_text: str = None):
+        """
+        设置HTML内容，同时保留纯文本版本用于复制
+
+        Args:
+            html: HTML内容
+            plain_text: 可选的纯文本内容，如果不提供则尝试从HTML提取
+        """
+        self.text_edit.setHtml(html)
+        if plain_text:
+            self._streaming_text = plain_text
+        else:
+            # 从HTML中提取纯文本
+            self._streaming_text = self.text_edit.toPlainText()
+
     @Slot()
     def clear(self):
         """清空文本"""
@@ -498,42 +513,302 @@ class StreamingAuditDisplay(StreamingTextDisplay):
     """
     流式审核结果显示组件
 
-    输出JSON，完成后自动转换为可读的Markdown格式审核报告
+    输出JSON，完成后自动转换为HTML表格格式审核报告
+    支持批量结果的展开/折叠功能
     """
+
+    # 展开状态变化信号
+    expand_changed = Signal(bool)
 
     def __init__(self, parent=None, max_height: int = 400, show_export: bool = False):
         super().__init__(parent, "AI 审核输出", max_height, show_export)
         self.setMaximumHeight(9999)  # 不限制组件高度
         self.text_edit.setMaximumHeight(9999)  # 不限制文本框高度
+        self._batch_data = None  # 存储批量审核原始数据
+        self._is_expanded = False  # 当前是否展开状态
+
+        # 创建展开按钮并插入到清空按钮左边
+        self._expand_btn = PushButton("展开详情")
+        self._expand_btn.setIcon(FIF.VIEW)
+        self._expand_btn.setFixedHeight(28)
+        self._expand_btn.clicked.connect(self._toggle_expand)
+        self._expand_btn.setVisible(False)  # 默认隐藏，批量审核时显示
+
+        # 获取标题栏布局并插入展开按钮
+        header_layout = self.layout().itemAt(0)
+        if header_layout:
+            # 在清空按钮之前插入展开按钮（索引3：标题、状态、stretch、清空、复制）
+            header_layout.insertWidget(3, self._expand_btn)
+
+    def show_expand_button(self, show: bool = True):
+        """显示/隐藏展开按钮"""
+        if self._expand_btn:
+            self._expand_btn.setVisible(show)
+            if show:
+                self._expand_btn.setText("展开详情")
+                self._is_expanded = False
+
+    def _toggle_expand(self):
+        """切换展开/折叠状态"""
+        if not self._batch_data:
+            return
+
+        self._is_expanded = not self._is_expanded
+
+        if self._is_expanded:
+            # 展开显示详细规则
+            html = self._batch_to_expanded_html(self._batch_data)
+            text = self._batch_to_expanded_text(self._batch_data)
+            self._expand_btn.setText("折叠摘要")
+        else:
+            # 折叠显示摘要表格
+            html = self._batch_data.get("_summary_html", "")
+            text = self._batch_data.get("_summary_text", "")
+            self._expand_btn.setText("展开详情")
+
+        if html:
+            self.set_html(html, text)
+
+        self.expand_changed.emit(self._is_expanded)
+
+    def set_batch_data(self, data: dict, summary_html: str, summary_text: str):
+        """设置批量审核数据，用于展开/折叠"""
+        self._batch_data = data
+        self._batch_data["_summary_html"] = summary_html
+        self._batch_data["_summary_text"] = summary_text
+
+    def _batch_to_expanded_html(self, data: dict) -> str:
+        """将批量审核结果展开为详细HTML"""
+        results = data.get("results", [])
+        summary = data.get("summary", {})
+
+        total = summary.get("total", len(results))
+        pass_count = summary.get("pass_count", 0)
+        review_count = summary.get("review_count", summary.get("warning_count", 0))
+        fail_count = summary.get("fail_count", 0)
+
+        # 计算整体状态
+        overall_status = data.get("status", "review")
+        if fail_count > 0:
+            overall_status = "fail"
+        elif review_count > 0:
+            overall_status = "review"
+        else:
+            overall_status = "pass"
+
+        status_colors = {
+            "pass": "#28a745",
+            "review": "#856404",
+            "fail": "#dc3545"
+        }
+        overall_color = status_colors.get(overall_status, "#856404")
+
+        html_parts = [
+            '<!DOCTYPE html>',
+            '<html><head>',
+            '<meta charset="utf-8">',
+            '<style>',
+            'body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; }',
+            '.batch-header { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 16px; }',
+            '.batch-title { font-weight: bold; font-size: 15px; margin-bottom: 8px; }',
+            '.batch-stats { font-size: 13px; }',
+            '.overall-badge { padding: 4px 12px; border-radius: 4px; font-weight: bold; color: white; margin-left: 10px; }',
+            '.image-section { margin-bottom: 20px; border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; background: #fff; }',
+            '.image-header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee; }',
+            '.image-title { font-weight: bold; font-size: 14px; color: #333; }',
+            '.image-status { padding: 2px 8px; border-radius: 3px; font-weight: bold; font-size: 12px; margin-left: 10px; }',
+            '.image-score { margin-left: 15px; color: #666; }',
+            '.status-pass { background: #d4edda; color: #155724; }',
+            '.status-review { background: #fff3cd; color: #856404; }',
+            '.status-fail { background: #f8d7da; color: #721c24; }',
+            '.status-error { background: #e2e3e5; color: #383d41; }',
+            'table { width: 100%; border-collapse: collapse; margin-top: 8px; }',
+            'th { background: #f1f3f4; padding: 6px 4px; text-align: left; font-weight: bold; border-bottom: 2px solid #dee2e6; font-size: 12px; }',
+            'td { padding: 5px 4px; border-bottom: 1px solid #eee; font-size: 12px; }',
+            '.rule-id { color: #666; font-family: monospace; width: 60px; }',
+            '.rule-content { color: #333; }',
+            '.rule-status { text-align: center; width: 50px; }',
+            '.badge { padding: 1px 5px; border-radius: 2px; font-size: 10px; font-weight: bold; }',
+            '.badge-pass { background: #d4edda; color: #155724; }',
+            '.badge-fail { background: #f8d7da; color: #721c24; }',
+            '.badge-review { background: #fff3cd; color: #856404; }',
+            '.confidence { color: #888; font-size: 11px; text-align: right; width: 45px; }',
+            '</style>',
+            '</head><body>',
+        ]
+
+        # 批量摘要头部
+        html_parts.append('<div class="batch-header">')
+        html_parts.append('<div class="batch-title">【批量审核摘要】')
+        html_parts.append(f'<span class="overall-badge" style="background:{overall_color};">{overall_status.upper()}</span>')
+        html_parts.append('</div>')
+        html_parts.append('<div class="batch-stats">')
+        html_parts.append(f'总数: {total} | ')
+        html_parts.append(f'<span style="color:#28a745;">PASS: {pass_count}</span> | ')
+        html_parts.append(f'<span style="color:#856404;">REVIEW: {review_count}</span> | ')
+        html_parts.append(f'<span style="color:#dc3545;">FAIL: {fail_count}</span>')
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+
+        # 每张图片的详细结果
+        for i, result in enumerate(results, 1):
+            status = result.get("status", "error")
+            status_labels = {"pass": "PASS", "review": "REVIEW", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+            status_label = status_labels.get(status, "?")
+            status_class = f"status-{status if status != 'warning' else 'review'}"
+            file_name = result.get("file_name", "未知")
+
+            html_parts.append('<div class="image-section">')
+            html_parts.append('<div class="image-header">')
+            html_parts.append(f'<span class="image-title">{i}. {file_name}</span>')
+            html_parts.append(f'<span class="image-status {status_class}">{status_label}</span>')
+
+            report = result.get("report", {})
+            if report:
+                score = report.get("score", 0)
+                html_parts.append(f'<span class="image-score">分数: {score}</span>')
+            html_parts.append('</div>')
+
+            if result.get("status") == "error":
+                html_parts.append(f'<div style="color:#666;">错误: {result.get("error", "未知错误")}</div>')
+                html_parts.append('</div>')
+                continue
+
+            # 规则检查表格
+            if report:
+                rule_checks = report.get("rule_checks", [])
+                if rule_checks:
+                    # 按状态排序: fail > review > pass
+                    status_order = {"fail": 0, "review": 1, "pass": 2}
+                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+
+                    html_parts.append('<table>')
+                    html_parts.append('<tr><th>规则ID</th><th>规则内容</th><th>状态</th><th>置信度</th></tr>')
+
+                    for check in sorted_checks:
+                        rule_id = check.get("rule_id", "")
+                        rule_content = check.get("rule_content", "") or rule_id
+                        check_status = (check.get("status") or "review").lower()
+                        if check_status == "warning":
+                            check_status = "review"
+                        if check_status not in ("pass", "review", "fail"):
+                            check_status = "review"
+                        confidence = check.get("confidence", 0)
+
+                        badge_class = f"badge-{check_status}"
+                        badge_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}[check_status]
+
+                        html_parts.append('<tr>')
+                        html_parts.append(f'<td class="rule-id">{rule_id}</td>')
+                        html_parts.append(f'<td class="rule-content">{rule_content}</td>')
+                        html_parts.append(f'<td class="rule-status"><span class="badge {badge_class}">{badge_text}</span></td>')
+                        html_parts.append(f'<td class="confidence">{confidence:.0%}</td>')
+                        html_parts.append('</tr>')
+
+                    html_parts.append('</table>')
+
+            html_parts.append('</div>')
+
+        html_parts.append('</body></html>')
+        return ''.join(html_parts)
+
+    def _batch_to_expanded_text(self, data: dict) -> str:
+        """将批量审核结果展开为详细纯文本"""
+        results = data.get("results", [])
+        summary = data.get("summary", {})
+
+        total = summary.get("total", len(results))
+        pass_count = summary.get("pass_count", 0)
+        review_count = summary.get("review_count", summary.get("warning_count", 0))
+        fail_count = summary.get("fail_count", 0)
+
+        # 计算整体状态
+        overall_status = data.get("status", "review")
+        if fail_count > 0:
+            overall_status = "fail"
+        elif review_count > 0:
+            overall_status = "review"
+        else:
+            overall_status = "pass"
+
+        lines = [
+            f"【批量审核摘要】",
+            f"总数: {total} | PASS: {pass_count} | REVIEW: {review_count} | FAIL: {fail_count}",
+            f"整体状态: {overall_status.upper()}",
+            "",
+            "【详细结果】",
+            ""
+        ]
+
+        for i, result in enumerate(results, 1):
+            status = result.get("status", "error")
+            status_labels = {"pass": "PASS", "review": "REVIEW", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+            status_label = status_labels.get(status, "?")
+            file_name = result.get("file_name", "未知")
+
+            lines.append(f"--- 图片 {i}: {file_name} ---")
+            lines.append(f"状态: [{status_label}]")
+
+            if result.get("status") == "error":
+                lines.append(f"错误: {result.get('error', '未知错误')}")
+                lines.append("")
+                continue
+
+            report = result.get("report", {})
+            if report:
+                score = report.get("score", 0)
+                lines.append(f"分数: {score}")
+
+                rule_checks = report.get("rule_checks", [])
+                if rule_checks:
+                    status_order = {"fail": 0, "review": 1, "pass": 2}
+                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+
+                    for check in sorted_checks:
+                        rule_id = check.get("rule_id", "")
+                        rule_content = check.get("rule_content", "") or rule_id
+                        check_status = (check.get("status") or "review").lower()
+                        if check_status == "warning":
+                            check_status = "review"
+                        if check_status not in ("pass", "review", "fail"):
+                            check_status = "review"
+                        confidence = check.get("confidence", 0)
+
+                        badge_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}[check_status]
+                        lines.append(f"[{badge_text}] {rule_id}: {rule_content} (置信度: {confidence:.0%})")
+
+            lines.append("")
+
+        return '\n'.join(lines)
 
     @Slot(str)
     def stop_streaming(self, status: str = ""):
         """
-        停止流式输出，转换为Markdown格式显示
+        停止流式输出，转换为HTML表格格式显示
         """
         super().stop_streaming(status)
 
-        # 尝试解析并转换为Markdown
+        # 尝试解析并转换为HTML表格
         try:
             text = self._streaming_text.strip()
             data = self._parse_json(text)
 
             if data:
                 self._raw_json = json.dumps(data, ensure_ascii=False, indent=2)
-                markdown = self._audit_to_markdown(data)
-                self.text_edit.setPlainText(markdown)
-                self._streaming_text = markdown
+                html = self._audit_to_html(data)
+                self.text_edit.setHtml(html)
+                # 保留纯文本版本用于复制和导出
+                self._streaming_text = self._audit_to_text(data)
 
-                # 切换样式为普通文本
+                # 切换样式
                 self.text_edit.setStyleSheet("""
                     TextEdit {
-                        background-color: #fafafa;
+                        background-color: #ffffff;
                         border: 1px solid #e0e0e0;
                         border-radius: 4px;
-                        padding: 12px;
+                        padding: 8px;
                         font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
-                        font-size: 14px;
-                        line-height: 1.6;
+                        font-size: 13px;
                     }
                 """)
         except Exception:
@@ -564,63 +839,149 @@ class StreamingAuditDisplay(StreamingTextDisplay):
 
         return None
 
-    def _audit_to_markdown(self, data: dict) -> str:
-        """将审核结果JSON转换为Markdown格式 - 同步导出报告格式"""
-        lines = []
-
-        # 评分和状态
+    def _audit_to_html(self, data: dict) -> str:
+        """将审核结果JSON转换为HTML表格格式"""
         score = data.get("score", 0)
-        status = data.get("status", "unknown")
+        status = data.get("status", "")
+        summary = data.get("summary", "")
+        rule_checks = data.get("rule_checks", [])
 
-        status_map = {
-            "pass": "PASS",
-            "warning": "REVIEW",
-            "fail": "FAIL",
-            "unknown": "?"
+        # 状态样式 - 仅支持 pass/review/fail
+        status_styles = {
+            "pass": ("PASS", "#28a745", "#d4edda"),
+            "review": ("REVIEW", "#856404", "#fff3cd"),
+            "fail": ("FAIL", "#dc3545", "#f8d7da"),
         }
-        status_text = status_map.get(status, "?")
+        # 默认为review
+        normalized_status = (status or "review").lower()
+        if normalized_status not in status_styles:
+            normalized_status = "review"
+        status_label, status_color, status_bg = status_styles[normalized_status]
 
-        lines.append(f"【审核结果】 评分: {score} 分  |  状态: [{status_text}]")
-        lines.append("")
+        html_parts = [
+            '<!DOCTYPE html>',
+            '<html><head>',
+            '<meta charset="utf-8">',
+            '<style>',
+            'body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; }',
+            '.header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #dee2e6; }',
+            '.score-box { margin-right: 20px; }',
+            '.score-value { font-size: 24px; font-weight: bold; color: #333; }',
+            '.score-label { font-size: 12px; color: #666; }',
+            '.status-badge { padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; }',
+            '.summary-box { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 12px; }',
+            '.summary-title { font-weight: bold; margin-bottom: 6px; color: #333; }',
+            '.summary-text { color: #555; line-height: 1.5; }',
+            'table { width: 100%; border-collapse: collapse; }',
+            'th { background: #f1f3f4; padding: 8px 6px; text-align: left; font-weight: bold; border-bottom: 2px solid #dee2e6; font-size: 12px; }',
+            'td { padding: 6px; border-bottom: 1px solid #eee; font-size: 12px; }',
+            'tr:hover { background: #f8f9fa; }',
+            '.rule-id { color: #666; font-family: monospace; width: 70px; }',
+            '.rule-content { color: #333; }',
+            '.rule-status { text-align: center; width: 60px; }',
+            '.badge { padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; }',
+            '.badge-pass { background: #d4edda; color: #155724; }',
+            '.badge-fail { background: #f8d7da; color: #721c24; }',
+            '.badge-review { background: #fff3cd; color: #856404; }',
+            '.confidence { color: #888; font-size: 11px; text-align: right; width: 50px; }',
+            '</style>',
+            '</head><body>',
+        ]
+
+        # 头部：分数和状态
+        html_parts.append('<div class="header">')
+        html_parts.append(f'<div class="score-box"><div class="score-value">{score}</div><div class="score-label">分数</div></div>')
+        html_parts.append(f'<span class="status-badge" style="background:{status_bg};color:{status_color};">{status_label}</span>')
+        html_parts.append('</div>')
 
         # 总体评价
+        if summary:
+            html_parts.append('<div class="summary-box">')
+            html_parts.append('<div class="summary-title">总体评价</div>')
+            html_parts.append(f'<div class="summary-text">{summary}</div>')
+            html_parts.append('</div>')
+
+        # 规则检查表格
+        if rule_checks:
+            # 按状态排序: fail > review > pass
+            status_order = {"fail": 0, "review": 1, "pass": 2}
+            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "review"), 3))
+
+            html_parts.append('<table>')
+            html_parts.append('<tr><th>规则ID</th><th>规则内容</th><th>状态</th><th>置信度</th></tr>')
+
+            for check in sorted_checks:
+                rule_id = check.get("rule_id", "")
+                rule_content = check.get("rule_content", "") or rule_id
+                check_status = (check.get("status") or "review").lower()
+                confidence = check.get("confidence", 0)
+
+                # 规范化状态，仅支持 pass/review/fail
+                if check_status not in ("pass", "review", "fail"):
+                    check_status = "review"
+
+                badge_class = f"badge-{check_status}"
+                badge_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}[check_status]
+
+                html_parts.append('<tr>')
+                html_parts.append(f'<td class="rule-id">{rule_id}</td>')
+                html_parts.append(f'<td class="rule-content">{rule_content}</td>')
+                html_parts.append(f'<td class="rule-status"><span class="badge {badge_class}">{badge_text}</span></td>')
+                html_parts.append(f'<td class="confidence">{confidence:.0%}</td>')
+                html_parts.append('</tr>')
+
+            html_parts.append('</table>')
+
+        html_parts.append('</body></html>')
+        return ''.join(html_parts)
+
+    def _audit_to_text(self, data: dict) -> str:
+        """将审核结果转换为纯文本格式（用于复制和导出）"""
+        lines = []
+
+        score = data.get("score", 0)
+        status = data.get("status", "")
         summary = data.get("summary", "")
+        rule_checks = data.get("rule_checks", [])
+
+        # 仅支持 pass/review/fail
+        status_map = {"pass": "PASS", "review": "REVIEW", "fail": "FAIL"}
+        normalized_status = (status or "review").lower()
+        if normalized_status not in status_map:
+            normalized_status = "review"
+        status_label = status_map[normalized_status]
+
+        lines.append(f"【审核结果】 分数: {score} | 状态: {status_label}")
+        lines.append("")
+
         if summary:
             lines.append("【总体评价】")
             lines.append(f"  {summary}")
             lines.append("")
 
-        # 规则检查清单 - 使用导出报告格式
-        rule_checks = data.get("rule_checks", [])
         if rule_checks:
             lines.append("【规则检查清单】")
-            lines.append("")
-
-            # 按状态分组排序: fail > review > pass
             status_order = {"fail": 0, "review": 1, "pass": 2}
-            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "pass"), 3))
+            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "review"), 3))
 
             for check in sorted_checks:
                 rule_id = check.get("rule_id", "")
                 rule_content = check.get("rule_content", "") or rule_id
-                check_status = check.get("status", "pass")
+                check_status = (check.get("status") or "review").lower()
                 confidence = check.get("confidence", 0)
-                reference = check.get("reference", "")
 
-                # 状态图标
-                if check_status == "pass":
-                    status_label = "PASS"
-                elif check_status == "fail":
-                    status_label = "FAIL"
-                else:
-                    status_label = "REVIEW"
+                # 规范化状态
+                if check_status not in ("pass", "review", "fail"):
+                    check_status = "review"
+                badge_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}[check_status]
 
-                # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
-                lines.append(f"[{status_label}] {rule_id} : {rule_content} -->> {status_label} >> {reference}，置信度：{confidence:.2f}；")
+                lines.append(f"[{badge_text}] {rule_id}: {rule_content} (置信度: {confidence:.0%})")
 
-            lines.append("")
+        return '\n'.join(lines)
 
-        return "\n".join(lines)
+    def _audit_to_markdown(self, data: dict) -> str:
+        """将审核结果JSON转换为Markdown格式 - 用于导出"""
+        return self._audit_to_text(data)
 
     def get_parsed_json(self) -> Optional[dict]:
         """获取解析后的JSON对象"""
