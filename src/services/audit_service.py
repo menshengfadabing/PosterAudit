@@ -42,31 +42,31 @@ class AuditService:
         "enabled": True,            # 是否启用压缩
     }
 
-    # 压缩预设
+    # 压缩预设（智能压缩：只在必要时处理，避免反向压缩）
     COMPRESSION_PRESETS = {
         "high_quality": {
-            "max_dimension": 2560,
+            "max_dimension": 1920,      # 不放大，只缩小超限图片
             "max_file_size": 1_000_000,  # 1MB
-            "quality": 90,
+            "quality": 85,              # 较高质量
             "enabled": True,
         },
         "balanced": {
-            "max_dimension": 1920,
+            "max_dimension": 1920,      # 标准高清
             "max_file_size": 500_000,    # 500KB
-            "quality": 75,
+            "quality": 75,              # 平衡质量
             "enabled": True,
         },
         "high_compression": {
-            "max_dimension": 1280,
+            "max_dimension": 1280,      # 适中尺寸
             "max_file_size": 300_000,    # 300KB
-            "quality": 60,
+            "quality": 60,              # 较低质量
             "enabled": True,
         },
         "no_compression": {
-            "max_dimension": 4096,
-            "max_file_size": 10_000_000,  # 10MB
-            "quality": 95,
-            "enabled": False,
+            "max_dimension": 99999,     # 几乎不限制（保持原图尺寸）
+            "max_file_size": 99_000_000,  # 几乎不限制（保持原图大小）
+            "quality": 100,             # 最高质量
+            "enabled": False,           # 禁用处理
         },
     }
 
@@ -90,6 +90,12 @@ class AuditService:
         """
         预处理图片 - 智能压缩以节省Token和传输时间
 
+        智能压缩策略：
+        1. 分析原图属性（格式、尺寸、大小、质量）
+        2. 根据原图情况动态决定压缩策略
+        3. 只在确实能减小体积时才压缩
+        4. 避免反向压缩（压缩后比原图大）
+
         Args:
             image_data: 图片数据（bytes或base64字符串）
             image_format: 图片格式
@@ -112,16 +118,92 @@ class AuditService:
             else:
                 image_data = base64.b64decode(image_data)
 
+        original_bytes = len(image_data)
+        original_kb = original_bytes / 1024
+
         img = Image.open(BytesIO(image_data))
         original_size = img.size
-        original_kb = len(image_data) / 1024
+        original_format = image_format.lower()
+        if original_format == "jpg":
+            original_format = "jpeg"
 
         # 如果禁用压缩，直接返回
         if not config.get("enabled", True):
-            logger.info(f"压缩已禁用，原图大小: {original_kb:.1f}KB")
-            return base64.b64encode(image_data).decode(), image_format
+            logger.info(f"压缩已禁用，原图: {original_size}, {original_kb:.1f}KB, 格式: {original_format}")
+            return base64.b64encode(image_data).decode(), original_format
 
-        # 转换为RGB模式（统一处理）
+        # ===== 分析原图属性 =====
+
+        # 检测原图是否为JPEG及其质量估算
+        is_original_jpeg = original_format == "jpeg"
+        estimated_quality = self._estimate_jpeg_quality(image_data) if is_original_jpeg else None
+
+        # 分析PNG是否适合转换为JPEG
+        is_png_with_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+        png_to_jpeg_potential = original_format == "png" and not is_png_with_alpha
+
+        logger.info(f"原图分析: {original_size}, {original_kb:.1f}KB, 格式={original_format}, "
+                    f"mode={img.mode}, JPEG质量≈{estimated_quality}, 有Alpha={is_png_with_alpha}")
+
+        # ===== 智能决策：是否需要处理 =====
+
+        max_dimension = config.get("max_dimension", 1920)
+        max_file_size = config.get("max_file_size", 500_000)
+        target_quality = config.get("quality", 75)
+
+        # 决策因子
+        needs_resize = max(img.size) > max_dimension
+        needs_quality_reduction = False
+        needs_format_conversion = False
+
+        # 1. 尺寸决策：只有原图大于max_dimension才需要缩放
+        if needs_resize:
+            logger.info(f"需要缩放: {max(img.size)} > {max_dimension}")
+        else:
+            logger.info(f"尺寸合适: {max(img.size)} <= {max_dimension}, 无需缩放")
+
+        # 2. 质量决策：对比原图质量和目标质量
+        if is_original_jpeg and estimated_quality:
+            if estimated_quality <= target_quality:
+                # 原图质量已经低于或等于目标，不需要降低质量
+                logger.info(f"质量合适: 原图≈{estimated_quality} <= 目标{target_quality}, 无需降低质量")
+            else:
+                # 原图质量高于目标，需要降低
+                needs_quality_reduction = True
+                logger.info(f"需要降质: 原图≈{estimated_quality} > 目标{target_quality}")
+
+        # 3. 格式转换决策：PNG转JPEG可能节省空间
+        if png_to_jpeg_potential:
+            # PNG无损转JPEG有损，通常能节省空间（除非PNG本身很小）
+            needs_format_conversion = True
+            logger.info(f"建议转换: PNG无Alpha -> JPEG (可能节省空间)")
+
+        # 4. 文件大小决策：原图是否已满足大小要求
+        if original_bytes <= max_file_size and not needs_resize:
+            # 原图大小已满足要求且尺寸合适，检查是否还需要处理
+            if is_original_jpeg and estimated_quality and estimated_quality <= target_quality:
+                # JPEG质量也合适 -> 无需处理，直接返回原图
+                logger.info(f"原图已满足所有要求: {original_kb:.1f}KB <= {max_file_size/1024:.1f}KB, "
+                            f"尺寸合适, 质量≈{estimated_quality}, 直接返回原图")
+                return base64.b64encode(image_data).decode(), original_format
+            elif png_to_jpeg_potential and original_kb > 50:
+                # PNG较大，转JPEG可能更小，继续处理
+                needs_format_conversion = True
+            else:
+                # 其他情况，原图满足要求
+                logger.info(f"原图大小合适: {original_kb:.1f}KB <= {max_file_size/1024:.1f}KB, 尺寸合适, 返回原图")
+                return base64.b64encode(image_data).decode(), original_format
+
+        # ===== 执行压缩 =====
+
+        # 如果没有任何处理需求，直接返回原图
+        if not needs_resize and not needs_quality_reduction and not needs_format_conversion:
+            # 但可能需要检查是否超过大小限制
+            if original_bytes <= max_file_size:
+                logger.info(f"无需任何处理，直接返回原图")
+                return base64.b64encode(image_data).decode(), original_format
+
+        # 转换为RGB模式
         if img.mode in ("RGBA", "P", "LA", "L"):
             if img.mode == "RGBA":
                 background = Image.new("RGB", img.size, (255, 255, 255))
@@ -138,38 +220,113 @@ class AuditService:
             else:
                 img = img.convert("RGB")
 
-        # 智能缩放
-        max_dimension = config.get("max_dimension", 1920)
-        if max(img.size) > max_dimension:
+        # 缩放（仅在需要时）
+        if needs_resize:
             ratio = max_dimension / max(img.size)
             new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
             logger.info(f"图片缩放: {original_size} -> {img.size}")
 
-        # 压缩为JPEG格式
-        quality = config.get("quality", 75)
-        max_file_size = config.get("max_file_size", 500_000)
+        # 动态调整压缩质量
+        # 如果原图是高质量JPEG，用目标质量压缩；如果原图质量已经较低，保持相近质量
+        actual_quality = target_quality
+        if is_original_jpeg and estimated_quality and not needs_quality_reduction:
+            # 原图质量合适，保持相近质量（略微降低以补偿重编码开销）
+            actual_quality = min(estimated_quality, target_quality)
+            logger.info(f"保持相近质量: actual_quality={actual_quality}")
 
+        # 压缩为JPEG
         buffer = BytesIO()
-        img.save(buffer, format="JPEG", quality=quality, optimize=True)
+        img.save(buffer, format="JPEG", quality=actual_quality, optimize=True)
 
-        # 检查文件大小，如果过大则进一步压缩
-        file_size = len(buffer.getvalue())
-        if file_size > max_file_size:
-            # 计算需要的质量
-            new_quality = max(50, int(quality * max_file_size / file_size))
+        compressed_bytes = len(buffer.getvalue())
+        compressed_kb = compressed_bytes / 1024
+
+        # ===== 压缩效果检查 =====
+
+        # 如果压缩后比原图大，且原图满足大小和尺寸要求，返回原图
+        if compressed_bytes > original_bytes:
+            if original_bytes <= max_file_size and not needs_resize:
+                logger.warning(f"压缩效果不佳: {compressed_kb:.1f}KB > {original_kb:.1f}KB, 返回原图")
+                return base64.b64encode(image_data).decode(), original_format
+            else:
+                # 原图超限，即使压缩后更大也得用（通常是尺寸缩放导致）
+                logger.warning(f"压缩后变大但原图超限: {compressed_kb:.1f}KB > {original_kb:.1f}KB, "
+                               f"原图{original_kb:.1f}KB > {max_file_size/1024:.1f}KB 或尺寸超限")
+
+        # 如果仍然超过大小限制，进一步降低质量
+        if compressed_bytes > max_file_size:
+            # 计算需要的质量（保守估计）
+            new_quality = max(40, int(actual_quality * 0.8 * max_file_size / compressed_bytes))
             buffer = BytesIO()
             img.save(buffer, format="JPEG", quality=new_quality, optimize=True)
-            logger.info(f"图片进一步压缩: quality={new_quality}, size={len(buffer.getvalue())}")
+            compressed_bytes = len(buffer.getvalue())
+            compressed_kb = compressed_bytes / 1024
+            logger.info(f"二次压缩: quality={new_quality}, size={compressed_kb:.1f}KB")
 
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+            # 再次检查是否比原图大
+            if compressed_bytes > original_bytes and original_bytes <= max_file_size:
+                logger.warning(f"二次压缩仍比原图大: {compressed_kb:.1f}KB > {original_kb:.1f}KB, 返回原图")
+                return base64.b64encode(image_data).decode(), original_format
 
         # 记录压缩效果
-        compressed_kb = len(buffer.getvalue()) / 1024
         compression_ratio = (1 - compressed_kb / original_kb) * 100 if original_kb > 0 else 0
-        logger.info(f"图片压缩完成: {original_kb:.1f}KB -> {compressed_kb:.1f}KB (节省{compression_ratio:.1f}%)")
+        logger.info(f"压缩完成: {original_kb:.1f}KB -> {compressed_kb:.1f}KB "
+                    f"(节省{compression_ratio:.1f}%, 质量={actual_quality})")
 
+        image_base64 = base64.b64encode(buffer.getvalue()).decode()
         return image_base64, "jpeg"
+
+    def _estimate_jpeg_quality(self, image_data: bytes) -> int | None:
+        """
+        估算JPEG图片的质量值
+
+        通过分析JPEG文件的量化表来估算编码时使用的质量参数
+
+        Args:
+            image_data: JPEG图片的二进制数据
+
+        Returns:
+            估算的质量值（1-100），如果无法估算返回None
+        """
+        try:
+            # PIL没有直接提供质量信息，通过文件大小和尺寸估算
+            img = Image.open(BytesIO(image_data))
+            width, height = img.size
+            file_size = len(image_data)
+
+            # 计算每像素字节数
+            pixels = width * height
+            bytes_per_pixel = file_size / pixels if pixels > 0 else 0
+
+            # 根据每像素字节数估算质量（经验公式）
+            # JPEG质量与压缩率大致对应：
+            # quality 90-100: ~2-4 bytes/pixel (高质量)
+            # quality 75-85:  ~0.8-2 bytes/pixel (中等)
+            # quality 50-70:  ~0.3-0.8 bytes/pixel (低质量)
+            # quality <50:    ~0.1-0.3 bytes/pixel (极低)
+
+            if bytes_per_pixel >= 2.5:
+                estimated = 95
+            elif bytes_per_pixel >= 1.5:
+                estimated = 85
+            elif bytes_per_pixel >= 0.8:
+                estimated = 75
+            elif bytes_per_pixel >= 0.5:
+                estimated = 60
+            elif bytes_per_pixel >= 0.3:
+                estimated = 50
+            else:
+                estimated = 40
+
+            logger.debug(f"JPEG质量估算: {file_size}字节, {width}x{height}, "
+                        f"{bytes_per_pixel:.2f}bytes/pixel -> quality≈{estimated}")
+
+            return estimated
+
+        except Exception as e:
+            logger.warning(f"JPEG质量估算失败: {e}")
+            return None
 
     def audit_file(self, file_path: str | Path, brand_id: str | None = None) -> AuditReport:
         """审核本地文件"""
