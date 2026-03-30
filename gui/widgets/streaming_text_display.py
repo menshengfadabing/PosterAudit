@@ -679,12 +679,19 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             if report:
                 rule_checks = report.get("rule_checks", [])
                 if rule_checks:
-                    # 按状态排序: fail > review > pass，相同状态按规则ID排序
+                    # 状态规范化函数：只保留 pass/review/fail 三种状态
+                    def normalize_status(s):
+                        if not s:
+                            return "review"
+                        s = s.lower()
+                        return s if s in ("pass", "fail", "review") else "review"
+
                     status_order = {"fail": 0, "review": 1, "pass": 2}
                     def get_sort_key(x):
                         rule_id = x.get("rule_id", "Rule_999")
                         rule_num = int(rule_id.replace("Rule_", "") or 999)
-                        return (status_order.get(x.get("status"), 3), rule_num)
+                        normalized = normalize_status(x.get("status"))
+                        return (status_order.get(normalized, 1), rule_num)
                     sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                     html_parts.append('<table>')
@@ -766,11 +773,19 @@ class StreamingAuditDisplay(StreamingTextDisplay):
 
                 rule_checks = report.get("rule_checks", [])
                 if rule_checks:
+                    # 状态规范化函数：只保留 pass/review/fail 三种状态
+                    def normalize_status(s):
+                        if not s:
+                            return "review"
+                        s = s.lower()
+                        return s if s in ("pass", "fail", "review") else "review"
+
                     status_order = {"fail": 0, "review": 1, "pass": 2}
                     def get_sort_key(x):
                         rule_id = x.get("rule_id", "Rule_999")
                         rule_num = int(rule_id.replace("Rule_", "") or 999)
-                        return (status_order.get(x.get("status"), 3), rule_num)
+                        normalized = normalize_status(x.get("status"))
+                        return (status_order.get(normalized, 1), rule_num)
                     sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                     for check in sorted_checks:
@@ -913,12 +928,19 @@ class StreamingAuditDisplay(StreamingTextDisplay):
 
         # 规则检查表格
         if rule_checks:
-            # 按状态排序: fail > review > pass，相同状态按规则ID排序
+            # 状态规范化函数：只保留 pass/review/fail 三种状态
+            def normalize_status(s):
+                if not s:
+                    return "review"
+                s = s.lower()
+                return s if s in ("pass", "fail", "review") else "review"
+
             status_order = {"fail": 0, "review": 1, "pass": 2}
             def get_sort_key(x):
                 rule_id = x.get("rule_id", "Rule_999")
                 rule_num = int(rule_id.replace("Rule_", "") or 999)
-                return (status_order.get(x.get("status", "review"), 3), rule_num)
+                normalized = normalize_status(x.get("status"))
+                return (status_order.get(normalized, 1), rule_num)
             sorted_checks = sorted(rule_checks, key=get_sort_key)
 
             html_parts.append('<table>')
@@ -975,11 +997,19 @@ class StreamingAuditDisplay(StreamingTextDisplay):
 
         if rule_checks:
             lines.append("【规则检查清单】")
+            # 状态规范化函数：只保留 pass/review/fail 三种状态
+            def normalize_status(s):
+                if not s:
+                    return "review"
+                s = s.lower()
+                return s if s in ("pass", "fail", "review") else "review"
+
             status_order = {"fail": 0, "review": 1, "pass": 2}
             def get_sort_key(x):
                 rule_id = x.get("rule_id", "Rule_999")
                 rule_num = int(rule_id.replace("Rule_", "") or 999)
-                return (status_order.get(x.get("status", "review"), 3), rule_num)
+                normalized = normalize_status(x.get("status"))
+                return (status_order.get(normalized, 1), rule_num)
             sorted_checks = sorted(rule_checks, key=get_sort_key)
 
             for check in sorted_checks:
