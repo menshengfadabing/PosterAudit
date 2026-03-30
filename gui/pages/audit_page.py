@@ -592,12 +592,13 @@ class AuditPage(ScrollArea):
             '<html><head>',
             '<meta charset="utf-8">',
             '<style>',
-            'body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; }',
-            '.summary { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 16px; }',
+            'html, body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; height: auto; }',
+            'body { display: block; box-sizing: border-box; }',
+            '.summary { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 16px; width: 100%; box-sizing: border-box; }',
             '.summary-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; }',
             '.summary-stats { display: inline-block; margin-right: 20px; }',
             '.overall-status { font-weight: bold; padding: 4px 12px; border-radius: 4px; color: white; }',
-            'table { width: 100%; border-collapse: collapse; margin-top: 10px; }',
+            'table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: auto; }',
             'th { background: #e9ecef; padding: 10px 8px; text-align: left; font-weight: bold; border-bottom: 2px solid #dee2e6; }',
             'td { padding: 8px; border-bottom: 1px solid #dee2e6; vertical-align: top; }',
             'tr:hover { background: #f8f9fa; }',
@@ -651,41 +652,28 @@ class AuditPage(ScrollArea):
             report = result.get("report", {})
             score = report.get("score", 0) if report else 0
 
-            # 构建规则检查摘要（只显示FAIL和REVIEW）
+            # 构建规则检查摘要（只显示FAIL和REVIEW的数量）
             rule_checks = report.get("rule_checks", []) if report else []
-            fail_rules = [c for c in rule_checks if c.get("status") == "fail"]
-            review_rules = [c for c in rule_checks if c.get("status") in ("review", "warning")]
+            fail_count_item = len([c for c in rule_checks if c.get("status") == "fail"])
+            review_count_item = len([c for c in rule_checks if c.get("status") in ("review", "warning")])
 
             rule_summary_parts = []
 
-            if fail_rules:
-                rule_summary_parts.append(f'<span style="color:#dc3545;font-weight:bold;">FAIL: {len(fail_rules)}项</span>')
-            if review_rules:
-                rule_summary_parts.append(f'<span style="color:#856404;">REVIEW: {len(review_rules)}项</span>')
-            if not fail_rules and not review_rules:
+            if fail_count_item > 0:
+                rule_summary_parts.append(f'<span style="color:#dc3545;font-weight:bold;">FAIL: {fail_count_item}</span>')
+            if review_count_item > 0:
+                rule_summary_parts.append(f'<span style="color:#856404;">REVIEW: {review_count_item}</span>')
+            if not rule_summary_parts:
                 rule_summary_parts.append('<span style="color:#28a745;">全部通过</span>')
 
             rule_summary = ' | '.join(rule_summary_parts)
-
-            # 构建详细规则列表
-            detail_lines = []
-            for c in fail_rules[:5]:  # 最多显示5个
-                rule_id = c.get("rule_id", "")
-                detail_lines.append(f'<span class="rule-fail">[{rule_id}]</span>')
-            for c in review_rules[:3]:  # 最多显示3个
-                rule_id = c.get("rule_id", "")
-                detail_lines.append(f'<span class="rule-review">[{rule_id}]</span>')
-
-            detail_html = ' '.join(detail_lines)
-            if len(fail_rules) > 5 or len(review_rules) > 3:
-                detail_html += ' ...'
 
             html_parts.append(f'<tr>')
             html_parts.append(f'<td>{i}</td>')
             html_parts.append(f'<td class="file-name">{file_name}</td>')
             html_parts.append(f'<td><span class="status-badge {status_class}">{status_label}</span></td>')
             html_parts.append(f'<td class="score">{score}</td>')
-            html_parts.append(f'<td>{rule_summary}<br><span style="font-size:11px;color:#666;">{detail_html}</span></td>')
+            html_parts.append(f'<td>{rule_summary}</td>')
             html_parts.append(f'</tr>')
 
         html_parts.append('</table>')
