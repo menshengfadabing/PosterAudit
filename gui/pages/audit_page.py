@@ -443,9 +443,13 @@ class AuditPage(ScrollArea):
             if rule_checks:
                 lines.append("")
 
-                # 按状态排序: fail > review > pass
+                # 按状态排序: fail > review > pass，相同状态按规则ID排序
                 status_order = {"fail": 0, "review": 1, "pass": 2}
-                sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                def get_sort_key(x):
+                    rule_id = x.get("rule_id", "Rule_999")
+                    rule_num = int(rule_id.replace("Rule_", "") or 999)
+                    return (status_order.get(x.get("status"), 3), rule_num)
+                sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                 for check in sorted_checks:
                     rule_id = check.get("rule_id", "")
@@ -733,9 +737,13 @@ class AuditPage(ScrollArea):
                 if rule_checks:
                     lines.append("")
 
-                    # 按状态排序: fail > review > pass
+                    # 按状态排序: fail > review > pass，相同状态按规则ID排序
                     status_order = {"fail": 0, "review": 1, "pass": 2}
-                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                    def get_sort_key(x):
+                        rule_id = x.get("rule_id", "Rule_999")
+                        rule_num = int(rule_id.replace("Rule_", "") or 999)
+                        return (status_order.get(x.get("status"), 3), rule_num)
+                    sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                     for check in sorted_checks:
                         rule_id = check.get("rule_id", "")
@@ -990,7 +998,11 @@ class AuditPage(ScrollArea):
             lines.append("")
 
             status_order = {"fail": 0, "review": 1, "pass": 2}
-            sorted_checks = sorted(report.rule_checks, key=lambda x: status_order.get(x.status, 3))
+            def get_sort_key(x):
+                rule_id = x.rule_id or "Rule_999"
+                rule_num = int(rule_id.replace("Rule_", "") or 999)
+                return (status_order.get(x.status, 3), rule_num)
+            sorted_checks = sorted(report.rule_checks, key=get_sort_key)
 
             for check in sorted_checks:
                 status_text = {"pass": "[PASS]", "fail": "[FAIL]", "review": "[REVIEW]"}.get(check.status, "[?]")

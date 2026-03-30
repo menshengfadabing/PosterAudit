@@ -679,9 +679,13 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             if report:
                 rule_checks = report.get("rule_checks", [])
                 if rule_checks:
-                    # 按状态排序: fail > review > pass
+                    # 按状态排序: fail > review > pass，相同状态按规则ID排序
                     status_order = {"fail": 0, "review": 1, "pass": 2}
-                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                    def get_sort_key(x):
+                        rule_id = x.get("rule_id", "Rule_999")
+                        rule_num = int(rule_id.replace("Rule_", "") or 999)
+                        return (status_order.get(x.get("status"), 3), rule_num)
+                    sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                     html_parts.append('<table>')
                     html_parts.append('<tr><th>规则ID</th><th>规则内容</th><th>状态</th><th>置信度</th></tr>')
@@ -763,7 +767,11 @@ class StreamingAuditDisplay(StreamingTextDisplay):
                 rule_checks = report.get("rule_checks", [])
                 if rule_checks:
                     status_order = {"fail": 0, "review": 1, "pass": 2}
-                    sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                    def get_sort_key(x):
+                        rule_id = x.get("rule_id", "Rule_999")
+                        rule_num = int(rule_id.replace("Rule_", "") or 999)
+                        return (status_order.get(x.get("status"), 3), rule_num)
+                    sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                     for check in sorted_checks:
                         rule_id = check.get("rule_id", "")
@@ -905,9 +913,13 @@ class StreamingAuditDisplay(StreamingTextDisplay):
 
         # 规则检查表格
         if rule_checks:
-            # 按状态排序: fail > review > pass
+            # 按状态排序: fail > review > pass，相同状态按规则ID排序
             status_order = {"fail": 0, "review": 1, "pass": 2}
-            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "review"), 3))
+            def get_sort_key(x):
+                rule_id = x.get("rule_id", "Rule_999")
+                rule_num = int(rule_id.replace("Rule_", "") or 999)
+                return (status_order.get(x.get("status", "review"), 3), rule_num)
+            sorted_checks = sorted(rule_checks, key=get_sort_key)
 
             html_parts.append('<table>')
             html_parts.append('<tr><th>规则ID</th><th>规则内容</th><th>状态</th><th>置信度</th></tr>')
@@ -964,7 +976,11 @@ class StreamingAuditDisplay(StreamingTextDisplay):
         if rule_checks:
             lines.append("【规则检查清单】")
             status_order = {"fail": 0, "review": 1, "pass": 2}
-            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "review"), 3))
+            def get_sort_key(x):
+                rule_id = x.get("rule_id", "Rule_999")
+                rule_num = int(rule_id.replace("Rule_", "") or 999)
+                return (status_order.get(x.get("status", "review"), 3), rule_num)
+            sorted_checks = sorted(rule_checks, key=get_sort_key)
 
             for check in sorted_checks:
                 rule_id = check.get("rule_id", "")
