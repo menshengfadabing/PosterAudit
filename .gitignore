@@ -21,10 +21,8 @@ venv/
 *.log
 logs/
 
-# User data (not to be packaged)
-data/audit_history/
-data/exports/
-data/uploads/
+# User data (runtime generated, auto-created on startup)
+data/
 
 # Test files
 test/
