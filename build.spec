@@ -8,9 +8,12 @@ from pathlib import Path
 project_root = Path(SPECPATH)
 
 # 收集所有需要的数据文件
-datas = [
-    ('config', 'config'),
-]
+datas = []
+
+# 检查 config 目录是否存在（可选）
+config_dir = project_root / 'config'
+if config_dir.exists() and any(config_dir.iterdir()):
+    datas.append(('config', 'config'))
 
 # 检查是否有额外的数据目录
 data_dir = project_root / 'data'
