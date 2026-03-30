@@ -482,10 +482,39 @@ class AuditService:
             except ValueError:
                 pass
 
+        # 根据规则检查结果修正最终评价
+        # 规则：最终评价不能高于规则列表中的最差状态
+        original_score = result.get("score", 0)
+        original_status = result.get("status", "fail")
+
+        # 找出规则检查中的最差状态
+        worst_status = "pass"  # 默认为通过
+        status_priority = {"fail": 0, "review": 1, "pass": 2}
+
+        for check in rule_checks:
+            check_status = check.status.lower() if check.status else "review"
+            if status_priority.get(check_status, 2) < status_priority.get(worst_status, 2):
+                worst_status = check_status
+
+        # 根据最差状态限制最终评价
+        final_status = original_status
+        final_score = original_score
+
+        if worst_status == "fail":
+            # 有FAIL规则，最终状态必须为FAIL，分数不超过55
+            final_status = "fail"
+            final_score = min(original_score, 55)
+        elif worst_status == "review":
+            # 有REVIEW规则（无FAIL），最终状态必须为REVIEW，分数不超过70
+            final_status = "review"
+            final_score = min(original_score, 70)
+
+        logger.info(f"评价修正: 原始({original_status}, {original_score}) -> 最终({final_status}, {final_score}), 规则最差状态={worst_status}")
+
         # 构建报告
         return AuditReport(
-            score=result.get("score", 0),
-            status=AuditStatus(result.get("status", "fail")),
+            score=final_score,
+            status=AuditStatus(final_status),
             detection=detection,
             checks=checks,
             rule_checks=rule_checks,

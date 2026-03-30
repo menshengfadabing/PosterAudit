@@ -199,8 +199,8 @@ class LLMService:
         # === 3. 取较小值 ===
         max_images = min(max_by_input, max_by_output)
 
-        # 安全上限
-        max_images = min(max_images, 10)
+        # 安全上限（保守设置，避免输出token超限）
+        max_images = min(max_images, 2)
 
         logger.info(
             f"动态计算: 输入限制={max_by_input}张, 输出限制={max_by_output}张, "
