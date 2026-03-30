@@ -325,7 +325,11 @@ class HistoryPage(ScrollArea):
 
         if rule_checks:
             status_order = {"fail": 0, "review": 1, "pass": 2}
-            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "review"), 3))
+            def get_sort_key(x):
+                rule_id = x.get("rule_id", "Rule_999")
+                rule_num = int(rule_id.replace("Rule_", "") or 999)
+                return (status_order.get(x.get("status", "review"), 3), rule_num)
+            sorted_checks = sorted(rule_checks, key=get_sort_key)
 
             html_parts.append('<table>')
             html_parts.append('<tr><th>规则ID</th><th>规则内容</th><th>状态</th><th>置信度</th></tr>')
@@ -361,7 +365,11 @@ class HistoryPage(ScrollArea):
             text_lines.extend(["", "【总体评价】", f"  {summary}"])
         if rule_checks:
             text_lines.extend(["", "【规则检查清单】"])
-            for check in sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "review"), 3)):
+            def get_sort_key(x):
+                rule_id = x.get("rule_id", "Rule_999")
+                rule_num = int(rule_id.replace("Rule_", "") or 999)
+                return (status_order.get(x.get("status", "review"), 3), rule_num)
+            for check in sorted(rule_checks, key=get_sort_key):
                 rule_id = check.get("rule_id", "")
                 rule_content = check.get("rule_content", "") or rule_id
                 check_status = (check.get("status") or "review").lower()
@@ -560,9 +568,13 @@ class HistoryPage(ScrollArea):
             lines.append("【规则检查清单】")
             lines.append("")
 
-            # 按状态排序: fail > review > pass
+            # 按状态排序: fail > review > pass，相同状态按规则ID排序
             status_order = {"fail": 0, "review": 1, "pass": 2}
-            sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status", "pass"), 3))
+            def get_sort_key(x):
+                rule_id = x.get("rule_id", "Rule_999")
+                rule_num = int(rule_id.replace("Rule_", "") or 999)
+                return (status_order.get(x.get("status", "pass"), 3), rule_num)
+            sorted_checks = sorted(rule_checks, key=get_sort_key)
 
             for check in sorted_checks:
                 rule_id = check.get("rule_id", "")
@@ -675,9 +687,13 @@ class HistoryPage(ScrollArea):
                         lines.append("## 规则检查清单")
                         lines.append("")
 
-                        # 按状态排序
+                        # 按状态排序，相同状态按规则ID排序
                         status_order = {"fail": 0, "review": 1, "pass": 2, "warn": 1}
-                        sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                        def get_sort_key(x):
+                            rule_id = x.get("rule_id", "Rule_999")
+                            rule_num = int(rule_id.replace("Rule_", "") or 999)
+                            return (status_order.get(x.get("status"), 3), rule_num)
+                        sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                         for check in sorted_checks:
                             check_status = check.get("status", "review")
@@ -706,9 +722,13 @@ class HistoryPage(ScrollArea):
                 lines.append("## 规则检查清单")
                 lines.append("")
 
-                # 按状态排序
+                # 按状态排序，相同状态按规则ID排序
                 status_order = {"fail": 0, "review": 1, "pass": 2, "warn": 1}
-                sorted_checks = sorted(rule_checks, key=lambda x: status_order.get(x.get("status"), 3))
+                def get_sort_key(x):
+                    rule_id = x.get("rule_id", "Rule_999")
+                    rule_num = int(rule_id.replace("Rule_", "") or 999)
+                    return (status_order.get(x.get("status"), 3), rule_num)
+                sorted_checks = sorted(rule_checks, key=get_sort_key)
 
                 for check in sorted_checks:
                     check_status = check.get("status", "review")
