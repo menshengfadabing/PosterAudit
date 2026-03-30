@@ -160,10 +160,27 @@ class AuditPage(ScrollArea):
         self.brand_combo.clear()
 
         rules_list = rules_context.list_rules()
-        for rule in rules_list:
+        for i, rule in enumerate(rules_list):
             brand_id = rule.get("brand_id", "")
             brand_name = rule.get("brand_name", "未命名")
-            self.brand_combo.addItem(brand_name, brand_id)
+            self.brand_combo.addItem(brand_name)
+            self.brand_combo.setItemData(i, brand_id)  # qfluentwidgets 需要用 setItemData 设置数据
+
+        # 默认选择第一项
+        if self.brand_combo.count() > 0:
+            self.brand_combo.setCurrentIndex(0)
+
+    def _get_selected_brand_id(self) -> str:
+        """获取当前选择的品牌ID，确保返回有效值"""
+        brand_id = self.brand_combo.currentData()
+
+        # 如果下拉框没有选中或返回None，尝试使用第一项
+        if not brand_id and self.brand_combo.count() > 0:
+            self.brand_combo.setCurrentIndex(0)
+            brand_id = self.brand_combo.currentData()
+            logger.info(f"品牌下拉框未选择，自动使用第一项: {brand_id}")
+
+        return brand_id or ""
 
     def _on_images_selected(self, image_paths: list):
         """图片选择回调"""
@@ -177,7 +194,11 @@ class AuditPage(ScrollArea):
         if not image_paths:
             return
 
-        brand_id = self.brand_combo.currentData()
+        brand_id = self._get_selected_brand_id()
+
+        # 记录使用的品牌ID
+        brand_name = self.brand_combo.currentText()
+        logger.info(f"审核使用品牌: {brand_name} (brand_id={brand_id})")
 
         # 获取用户选择的压缩预设
         compression_preset = ["balanced", "high_quality", "high_compression", "no_compression"][self.compression_combo.currentIndex()]
@@ -266,6 +287,13 @@ class AuditPage(ScrollArea):
         # 获取品牌规范规则清单
         rules_checklist = rules_context.get_rules_checklist(brand_id)
 
+        # 记录实际使用的规则来源
+        if rules_checklist:
+            first_ref = rules_checklist[0].get("reference", "未知")
+            logger.info(f"实际使用规则来源: {first_ref}, 规则数量: {len(rules_checklist)}")
+        else:
+            logger.warning(f"未获取到规则清单, brand_id={brand_id}")
+
         # 流式调用LLM
         full_content = ""
 
@@ -315,7 +343,13 @@ class AuditPage(ScrollArea):
         """执行批量审核 - 使用合并请求，流式输出JSON"""
         import time
 
-        logger.info(f"开始批量审核，共 {len(image_paths)} 张图片")
+        logger.info(f"开始批量审核，共 {len(image_paths)} 张图片, brand_id={brand_id}")
+
+        # 记录规则来源
+        rules_checklist = rules_context.get_rules_checklist(brand_id)
+        if rules_checklist:
+            first_ref = rules_checklist[0].get("reference", "未知")
+            logger.info(f"实际使用规则来源: {first_ref}, 规则数量: {len(rules_checklist)}")
 
         total = len(image_paths)
         self._batch_results = []
@@ -420,7 +454,7 @@ class AuditPage(ScrollArea):
         """格式化单个审核结果 - 同步导出报告格式"""
         lines = []
 
-        status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+        status_map = {"pass": "PASS", "review": "REVIEW", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
         status_label = status_map.get(result.get("status"), "?")
         file_name = result.get("file_name", "未知")
 
@@ -1044,7 +1078,7 @@ class AuditPage(ScrollArea):
         ]
 
         for i, result in enumerate(self._last_batch_results, 1):
-            status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+            status_map = {"pass": "PASS", "review": "REVIEW", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
             status_label = status_map.get(result.get("status"), "?")
             lines.append(f"## {i}. {result.get('file_name', '未知文件')}")
             lines.append(f"\n**状态:** {status_label}\n")

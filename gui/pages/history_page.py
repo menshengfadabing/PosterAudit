@@ -700,7 +700,7 @@ class HistoryPage(ScrollArea):
 
                 report = r.get("report", {})
                 if report:
-                    status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
+                    status_map = {"pass": "PASS", "review": "REVIEW", "warning": "REVIEW", "fail": "FAIL", "error": "ERROR"}
                     status = status_map.get(r.get("status"), "?")
                     lines.append(f"**状态**: {status}")
                     lines.append("")
@@ -740,7 +740,7 @@ class HistoryPage(ScrollArea):
         elif "report" in data:
             # 单图报告
             report = data.get("report", {})
-            status_map = {"pass": "PASS", "warning": "REVIEW", "fail": "FAIL"}
+            status_map = {"pass": "PASS", "review": "REVIEW", "warning": "REVIEW", "fail": "FAIL"}
             status = status_map.get(report.get("status"), "?")
             lines.extend([
                 f"**状态**: {status}",
