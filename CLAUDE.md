@@ -22,6 +22,9 @@ uv run python test/test_core.py
 # Requires test data in data/uploads/
 uv run python test/test_full_flow.py
 
+# Test DeepSeek API connectivity
+uv run python test/test_deepseek.py
+
 # Package executable locally
 pyinstaller build.spec
 
@@ -52,9 +55,10 @@ main.py                 # Application entry point, Qt setup, font detection
 All services are singleton instances exported from `src/services/__init__.py`:
 
 - **llm_service** (`LLMService`): LangChain + OpenAI-compatible API for image audit
-  - Key methods: `audit_image()`, `audit_images_batch()`, `calculate_max_images()`, `test_doubao_connection()`, `test_deepseek_connection()`
+  - Key methods: `audit_image()`, `audit_image_stream()`, `audit_images_batch()`, `audit_images_batch_stream()`, `calculate_max_images()`, `test_doubao_connection()`, `test_deepseek_connection()`
   - Built-in token estimation for context window management
   - Uses `COMPRESSED_AUDIT_PROMPT` (single image) and `BATCH_AUDIT_PROMPT` (multi-image)
+  - Stream methods yield text chunks; use `parse_stream_result()` to parse complete JSON
 
 - **audit_service** (`AuditService`): Image preprocessing and audit orchestration
   - Key methods: `audit()`, `audit_file()`, `batch_audit_concurrent()`, `batch_audit_merged()`
@@ -93,11 +97,40 @@ Two approaches for batch processing in `AuditService`:
    - Auto-calculates `max_images_per_request` based on token limits
    - Falls back to single-image audit if batch fails
    - More efficient for small batches with good token management
+   - Max images capped at 10 per request (safety limit)
+
+### Token Estimation
+
+`LLMService.calculate_max_images()` dynamically computes batch size based on:
+1. **Input context window** (128k default): system prompt + rules + image tiles
+2. **Output token limit** (8k default, configurable to 16k): each image ~2000 tokens output
+   - Output limit is often the real bottleneck for batch processing
+3. **Image tile calculation**: 85 base tokens + 170 per 512×512 tile
+
+Use this when planning batch operations to avoid truncation errors.
 
 ### Data Flow
 
 1. **Upload brand guidelines** → DocumentParser extracts text → DeepSeek parses into BrandRules → RulesContextManager stores in `data/rules/{brand_id}/current.json`
 2. **Audit image** → AuditService preprocesses (compress/resize) → Doubao API call with rules checklist → AuditReport returned
+
+### Streaming Implementation
+
+Both document parsing and image audit support real-time streaming:
+
+```python
+# Stream audit results
+for chunk in llm_service.audit_image_stream(image_base64, format, rules_checklist):
+    # Update UI in real-time
+    display.append(chunk)
+
+# Parse final JSON after stream completes
+result = llm_service.parse_stream_result(full_content)
+```
+
+- Uses LangChain's `llm.stream()` for chunk-by-chunk output
+- Qt UI updates via `QMetaObject.invokeMethod` for cross-thread safety
+- `@Slot` decorators required for Qt slot functions in worker threads
 
 ### Rules Checklist System
 
@@ -142,3 +175,10 @@ Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/expor
 - Sidebar navigation uses `addSubInterface()` and switches `QStackedWidget` pages
 - Chinese font auto-detection in `main.py`
 - Responsive scaling via `gui/utils/responsive.py`
+
+## Test Structure
+
+- `test/test_core.py`: Module imports, schema validation, service instantiation, rules context CRUD
+- `test/test_full_flow.py`: End-to-end document parsing → image audit → report generation
+- `test/test_audit.py`: Audit service specific tests
+- `test/test_deepseek.py`: DeepSeek API connectivity verification
