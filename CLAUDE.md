@@ -167,7 +167,7 @@ Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/expor
 
 - **`BrandRules`**: Brand guidelines with `color`, `logo`, `font` (primary) and dynamic `secondary_rules` list
 - **`AuditReport`**: Audit result with `score` (0-100), `status`, `detection`, `rule_checks`, `issues`
-- **`AuditStatus`**: Enum with 4 values: `pass`, `warning`, `review`, `fail`
+- **`AuditStatus`**: Enum with 4 values: `pass`, `warning`, `review`, `fail` (code uses all 4; UI maps `warning`/`review` to same yellow display)
 - **`RuleCheckItem`**: Individual rule check with `rule_id`, `status` (pass/fail/review), `confidence`, `detail`
 - **`SecondaryRule`**: Dynamic rule with `category`, `name`, `content`, `priority`
 
@@ -183,5 +183,6 @@ Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/expor
 
 - `test/test_core.py`: Module imports, schema validation, service instantiation, rules context CRUD
 - `test/test_full_flow.py`: End-to-end document parsing → image audit → report generation
-- `test/test_audit.py`: Audit service specific tests
+- `test/test_audit.py`: Integration tests for audit functionality with local images
 - `test/test_deepseek.py`: DeepSeek API connectivity verification
+- `test/lm_test.py`: LM Studio local model connection testing (OpenAI-compatible API)
