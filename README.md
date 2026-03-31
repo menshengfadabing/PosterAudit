@@ -16,6 +16,7 @@
 - **多品牌支持**: 存储和管理多个品牌的规范文档
 - **快速切换**: 一键切换当前使用的品牌规范
 - **规范预览**: 格式化显示规范详情，支持导出 JSON/Markdown
+- **Logo参考图片**: 每个规范组可上传最多5张标准Logo参考图片，审核时作为视觉对照发送给多模态模型
 
 ### 3. 设计稿智能审核
 - **单图审核**: 上传单张设计稿，获取详细合规报告
@@ -27,11 +28,16 @@
 
 ### 4. 规则检查清单
 - **逐条审核**: 将品牌规范转换为规则清单，逐条检查合规性
-- **状态标识**: 每条规则标注结果（通过/不合规/需复核）和置信度
+- **状态标识**: 每条规则标注结果（PASS/REVIEW/FAIL）和置信度
+  - **PASS**: 合规，置信度通常 0.8-1.0
+  - **FAIL**: 不合规，需修改
+  - **REVIEW**: 需人工复核，置信度可能较低（软规则或需语境判断）
 - **优先级排序**: 问题规则优先显示，便于快速定位
+- **置信度说明**: 置信度表示 LLM 对判断的确定性（0-1），高风险标签等软规则默认进入人工复核
 
 ### 5. 报告生成与历史
 - **多格式导出**: JSON、Markdown 格式报告
+- **统一导出格式**: `[状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；`
 - **历史记录**: 自动保存每次审核结果，支持筛选查询
 - **持久化存储**: 所有数据本地存储，保护隐私
 
@@ -93,7 +99,10 @@ src/services/
 └── rules_context.py    # 规范上下文管理
     ├── get_rules()            # 获取规范
     ├── get_rules_checklist()  # 生成规则清单
-    └── add_rules()            # 添加规范
+    ├── add_rules()            # 添加规范
+    ├── add_reference_image()  # 添加Logo参考图片
+    ├── get_reference_images() # 获取参考图片列表
+    └── delete_reference_image() # 删除参考图片
 ```
 
 ### 流式输出实现
@@ -120,6 +129,14 @@ result = llm_service.parse_stream_result(full_content)
 核心 Pydantic 模型定义在 `src/models/schemas.py`：
 
 ```python
+class ReferenceImage(BaseModel):
+    """标准参考图片（Logo等）"""
+    filename: str              # 文件名
+    description: str           # 图片描述
+    image_type: str            # 图片类型：logo/logo_variant/icon等
+    file_size: int             # 文件大小(字节)
+    upload_time: datetime      # 上传时间
+
 class BrandRules(BaseModel):
     """品牌规范"""
     brand_name: str
@@ -127,15 +144,23 @@ class BrandRules(BaseModel):
     logo: Optional[LogoRules]        # Logo规范
     font: Optional[FontRules]        # 字体规范
     secondary_rules: list[SecondaryRule]  # 次要规范
+    reference_images: list[ReferenceImage]  # Logo参考图片列表
 
 class AuditReport(BaseModel):
     """审核报告"""
     score: int                    # 合规分数 0-100
-    status: AuditStatus           # pass/warning/fail
+    status: AuditStatus           # pass/review/fail
     rule_checks: list[RuleCheckItem]  # 规则检查清单
     issues: list[Issue]           # 问题列表
     summary: str                  # 总体评价
 ```
+
+### 审核状态说明
+
+系统统一使用三种审核状态：
+- **pass**: 合规通过
+- **review**: 需人工复核（高风险标签、语义判断、场景适配等）
+- **fail**: 不合规，需修改
 
 ## 快速开始
 
@@ -275,3 +300,15 @@ sudo apt install fonts-noto-cjk
 ## License
 
 MIT
+
+## 更新日志
+
+### v1.1.2
+- 新增 Logo 参考图片功能：每个规范组可上传最多5张标准Logo图片，审核时作为视觉对照
+- 统一审核状态为三种：pass/review/fail（移除 warning 状态）
+- 修复批量导出报告缺少参考文档和置信度的 bug
+- 优化导出报告格式统一性
+
+### v1.1.1
+- 修复 Logo 参考图片在审核时不生效的 bug
+- 优化规范管理页面删除按钮显示

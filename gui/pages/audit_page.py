@@ -1045,7 +1045,7 @@ class AuditPage(ScrollArea):
             InfoBar.success(title="成功", content=f"已导出到:\n{file_path}", parent=self)
 
     def _report_to_markdown(self, report) -> str:
-        """将报告转换为Markdown"""
+        """将报告转换为Markdown - 同步导出报告格式"""
         lines = [
             "# 品牌合规审核报告",
             "",
@@ -1073,16 +1073,16 @@ class AuditPage(ScrollArea):
             sorted_checks = sorted(report.rule_checks, key=get_sort_key)
 
             for check in sorted_checks:
-                status_text = {"pass": "[PASS]", "fail": "[FAIL]", "review": "[REVIEW]"}.get(check.status, "[?]")
-                lines.append(f"- {status_text} {check.rule_id}: {check.rule_content}")
-                lines.append(f"  - 置信度: {check.confidence:.0%}")
-                if check.detail:
-                    lines.append(f"  - 说明: {check.detail}")
+                status_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}.get(check.status, "REVIEW")
+                confidence = check.confidence
+                reference = check.reference if hasattr(check, 'reference') else ""
+                # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
+                lines.append(f"[{status_text}] {check.rule_id} : {check.rule_content} -->> {status_text} >> {reference}，置信度：{confidence:.2f}；")
 
         return "\n".join(lines)
 
     def _generate_batch_markdown(self) -> str:
-        """生成批量报告Markdown"""
+        """生成批量报告Markdown - 同步导出报告格式"""
         lines = [
             "# 批量审核报告",
             f"\n**生成时间:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
@@ -1097,12 +1097,36 @@ class AuditPage(ScrollArea):
 
             report = result.get("report", {})
             if report:
+                score = report.get("score", 0)
+                if score:
+                    lines.append(f"**分数:** {score}\n")
+
                 rule_checks = report.get("rule_checks", [])
                 if rule_checks:
                     lines.append("### 规则检查清单\n")
-                    for check in rule_checks:
-                        status_text = {"pass": "[PASS]", "fail": "[FAIL]", "review": "[REVIEW]"}.get(check.get("status"), "[?]")
-                        lines.append(f"- {status_text} {check.get('rule_id', '')}: {check.get('rule_content', '')}")
+
+                    # 状态规范化函数：只保留 pass/review/fail 三种状态
+                    def normalize_status(s):
+                        if not s:
+                            return "review"
+                        s = s.lower()
+                        return s if s in ("pass", "fail", "review") else "review"
+
+                    status_order = {"fail": 0, "review": 1, "pass": 2}
+                    def get_sort_key(x):
+                        rule_id = x.get("rule_id", "Rule_999")
+                        rule_num = int(rule_id.replace("Rule_", "") or 999)
+                        normalized = normalize_status(x.get("status"))
+                        return (status_order.get(normalized, 1), rule_num)
+                    sorted_checks = sorted(rule_checks, key=get_sort_key)
+
+                    for check in sorted_checks:
+                        check_status = check.get("status", "review")
+                        status_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}.get(check_status, "REVIEW")
+                        confidence = check.get("confidence", 0)
+                        reference = check.get("reference", "")
+                        # 导出报告格式: [状态] Rule_ID : 规则内容 -->> 状态 >> 参考文档，置信度：0.XX；
+                        lines.append(f"[{status_text}] {check.get('rule_id', '')} : {check.get('rule_content', '')} -->> {status_text} >> {reference}，置信度：{confidence:.2f}；")
                     lines.append("")
 
             lines.append("---\n")
