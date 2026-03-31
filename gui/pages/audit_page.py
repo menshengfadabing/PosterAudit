@@ -287,6 +287,9 @@ class AuditPage(ScrollArea):
         # 获取品牌规范规则清单
         rules_checklist = rules_context.get_rules_checklist(brand_id)
 
+        # 获取参考图片
+        reference_images = rules_context.get_reference_images_data(brand_id)
+
         # 记录实际使用的规则来源
         if rules_checklist:
             first_ref = rules_checklist[0].get("reference", "未知")
@@ -313,6 +316,7 @@ class AuditPage(ScrollArea):
                 image_base64=image_base64,
                 image_format=image_format,
                 rules_checklist=rules_checklist,
+                reference_images=reference_images,
                 stream_callback=stream_callback,
             ):
                 pass  # 迭代以完成流式输出
@@ -344,6 +348,11 @@ class AuditPage(ScrollArea):
         import time
 
         logger.info(f"开始批量审核，共 {len(image_paths)} 张图片, brand_id={brand_id}")
+
+        # 获取参考图片
+        reference_images = rules_context.get_reference_images_data(brand_id)
+        if reference_images:
+            logger.info(f"使用 {len(reference_images)} 张参考图片")
 
         # 记录规则来源
         rules_checklist = rules_context.get_rules_checklist(brand_id)

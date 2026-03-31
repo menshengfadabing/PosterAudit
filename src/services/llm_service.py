@@ -17,7 +17,7 @@ COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品
 
 【品牌规范规则清单】
 {rules_checklist}
-
+{reference_hint}
 【输出格式】JSON:
 {{
   "score": 0-100,
@@ -41,9 +41,19 @@ COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品
 3. confidence: 对判断的置信度，0-1之间
 4. detail: 简要说明判断依据'''
 
+# 参考图片提示模板
+REFERENCE_IMAGE_PROMPT = '''
+【标准参考图片】
+以下提供了品牌的标准Logo/图标等参考图片。请仔细对比：
+1. 将待审核图片中的Logo与参考图片进行视觉对比
+2. 检查Logo的形状、比例、颜色是否与标准一致
+3. 判断Logo是否存在变形、拉伸或颜色错误
+4. 如发现差异，请在检查结果中详细说明
+'''
+
 # 批量审核Prompt - 多图合并
 BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品牌规范规则清单，逐条审核多张设计稿的合规性。
-
+{reference_hint}
 【品牌规范规则清单】
 {rules_checklist}
 
@@ -226,6 +236,7 @@ class LLMService:
         image_base64: str,
         image_format: str = "png",
         rules_checklist: list[dict] = None,
+        reference_images: list[dict] = None,
         progress_callback=None,
     ) -> dict[str, Any]:
         """
@@ -235,6 +246,7 @@ class LLMService:
             image_base64: Base64编码的图片数据
             image_format: 图片格式 (png/jpeg)
             rules_checklist: 规则检查清单
+            reference_images: 参考图片列表 [{"url": data_url, "format": str, "description": str}]
             progress_callback: 进度回调（未使用）
 
         Returns:
@@ -244,14 +256,36 @@ class LLMService:
             # 格式化规则清单为文本
             checklist_text = self._format_checklist(rules_checklist or [])
 
+            # 参考图片提示
+            reference_hint = REFERENCE_IMAGE_PROMPT if reference_images else ""
+
             # 构建Prompt
-            system_content = COMPRESSED_AUDIT_PROMPT.format(rules_checklist=checklist_text)
+            system_content = COMPRESSED_AUDIT_PROMPT.format(
+                rules_checklist=checklist_text,
+                reference_hint=reference_hint
+            )
             image_url = f"data:image/{image_format};base64,{image_base64}"
 
-            user_content = [
-                {"type": "text", "text": "审核这张设计稿，输出JSON格式报告。"},
-                {"type": "image_url", "image_url": {"url": image_url}},
-            ]
+            user_content = []
+
+            # 先添加参考图片
+            if reference_images:
+                user_content.append({"type": "text", "text": "【标准参考图片】以下是品牌标准Logo，请仔细对比："})
+                for i, ref_img in enumerate(reference_images, 1):
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": ref_img["url"]}
+                    })
+                    desc = ref_img.get("description", "标准Logo")
+                    user_content.append({
+                        "type": "text",
+                        "text": f"参考图片{i}：{desc}"
+                    })
+                user_content.append({"type": "text", "text": "---以上为参考图片，以下为待审核设计稿---"})
+
+            # 添加待审核图片
+            user_content.append({"type": "text", "text": "审核这张设计稿，输出JSON格式报告。"})
+            user_content.append({"type": "image_url", "image_url": {"url": image_url}})
 
             messages = [
                 SystemMessage(content=system_content),
@@ -259,7 +293,7 @@ class LLMService:
             ]
 
             # 调用LLM
-            logger.info("正在调用API进行审核...")
+            logger.info(f"正在调用API进行审核... (参考图片: {len(reference_images or [])}张)")
             response = self.llm.invoke(messages)
             content = response.content
 
@@ -282,6 +316,7 @@ class LLMService:
         image_base64: str,
         image_format: str = "png",
         rules_checklist: list[dict] = None,
+        reference_images: list[dict] = None,
         stream_callback=None,
     ):
         """
@@ -291,6 +326,7 @@ class LLMService:
             image_base64: Base64编码的图片数据
             image_format: 图片格式 (png/jpeg)
             rules_checklist: 规则检查清单
+            reference_images: 参考图片列表 [{"url": data_url, "format": str, "description": str}]
             stream_callback: 流式回调函数，接收每个文本块
 
         Yields:
@@ -302,14 +338,36 @@ class LLMService:
             # 格式化规则清单为文本
             checklist_text = self._format_checklist(rules_checklist or [])
 
+            # 参考图片提示
+            reference_hint = REFERENCE_IMAGE_PROMPT if reference_images else ""
+
             # 构建Prompt
-            system_content = COMPRESSED_AUDIT_PROMPT.format(rules_checklist=checklist_text)
+            system_content = COMPRESSED_AUDIT_PROMPT.format(
+                rules_checklist=checklist_text,
+                reference_hint=reference_hint
+            )
             image_url = f"data:image/{image_format};base64,{image_base64}"
 
-            user_content = [
-                {"type": "text", "text": "审核这张设计稿，输出JSON格式报告。"},
-                {"type": "image_url", "image_url": {"url": image_url}},
-            ]
+            user_content = []
+
+            # 先添加参考图片
+            if reference_images:
+                user_content.append({"type": "text", "text": "【标准参考图片】以下是品牌标准Logo，请仔细对比："})
+                for i, ref_img in enumerate(reference_images, 1):
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": ref_img["url"]}
+                    })
+                    desc = ref_img.get("description", "标准Logo")
+                    user_content.append({
+                        "type": "text",
+                        "text": f"参考图片{i}：{desc}"
+                    })
+                user_content.append({"type": "text", "text": "---以上为参考图片，以下为待审核设计稿---"})
+
+            # 添加待审核图片
+            user_content.append({"type": "text", "text": "审核这张设计稿，输出JSON格式报告。"})
+            user_content.append({"type": "image_url", "image_url": {"url": image_url}})
 
             messages = [
                 SystemMessage(content=system_content),
@@ -317,7 +375,7 @@ class LLMService:
             ]
 
             # 调用LLM流式API
-            logger.info("正在调用API进行流式审核...")
+            logger.info(f"正在调用API进行流式审核... (参考图片: {len(reference_images or [])}张)")
 
             for chunk in self.llm.stream(messages):
                 if chunk.content:
@@ -370,6 +428,7 @@ class LLMService:
         self,
         images: list[dict],
         rules_checklist: list[dict] = None,
+        reference_images: list[dict] = None,
         progress_callback=None,
     ) -> list[dict[str, Any]]:
         """
@@ -378,6 +437,7 @@ class LLMService:
         Args:
             images: 图片列表，每个元素包含 {"base64": str, "format": str}
             rules_checklist: 规则检查清单
+            reference_images: 参考图片列表 [{"url": data_url, "format": str, "description": str}]
             progress_callback: 进度回调
 
         Returns:
@@ -392,7 +452,8 @@ class LLMService:
                 result = self.audit_image(
                     images[0]["base64"],
                     images[0].get("format", "jpeg"),
-                    rules_checklist
+                    rules_checklist,
+                    reference_images
                 )
                 return [result]
 
@@ -401,11 +462,35 @@ class LLMService:
             # 格式化规则清单为文本
             checklist_text = self._format_checklist(rules_checklist or [])
 
-            # 构建Prompt
-            system_content = BATCH_AUDIT_PROMPT.format(rules_checklist=checklist_text)
+            # 参考图片提示
+            reference_hint = REFERENCE_IMAGE_PROMPT if reference_images else ""
 
-            # 构建用户消息，包含多张图片
-            user_content = [{"type": "text", "text": f"审核以下{len(images)}张设计稿，输出JSON数组格式的报告。每张图片对应一个对象。"}]
+            # 构建Prompt
+            system_content = BATCH_AUDIT_PROMPT.format(
+                rules_checklist=checklist_text,
+                reference_hint=reference_hint
+            )
+
+            # 构建用户消息
+            user_content = []
+
+            # 先添加参考图片
+            if reference_images:
+                user_content.append({"type": "text", "text": "【标准参考图片】以下是品牌标准Logo，请仔细对比："})
+                for i, ref_img in enumerate(reference_images, 1):
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": ref_img["url"]}
+                    })
+                    desc = ref_img.get("description", "标准Logo")
+                    user_content.append({
+                        "type": "text",
+                        "text": f"参考图片{i}：{desc}"
+                    })
+                user_content.append({"type": "text", "text": "---以上为参考图片，以下为待审核设计稿---"})
+
+            # 添加待审核图片
+            user_content.append({"type": "text", "text": f"审核以下{len(images)}张设计稿，输出JSON数组格式的报告。每张图片对应一个对象。"})
 
             for i, img in enumerate(images):
                 image_url = f"data:image/{img.get('format', 'jpeg')};base64,{img['base64']}"
@@ -424,7 +509,7 @@ class LLMService:
             ]
 
             # 调用LLM
-            logger.info("正在调用API进行批量审核...")
+            logger.info(f"正在调用API进行批量审核... (参考图片: {len(reference_images or [])}张)")
             response = self.llm.invoke(messages)
             content = response.content
 
@@ -444,6 +529,7 @@ class LLMService:
         self,
         images: list[dict],
         rules_checklist: list[dict] = None,
+        reference_images: list[dict] = None,
         stream_callback=None,
     ) -> list[dict[str, Any]]:
         """
@@ -452,6 +538,7 @@ class LLMService:
         Args:
             images: 图片列表，每个元素包含 {"base64": str, "format": str}
             rules_checklist: 规则检查清单
+            reference_images: 参考图片列表 [{"url": data_url, "format": str, "description": str}]
             stream_callback: 流式回调函数，接收每个文本块
 
         Returns:
@@ -468,6 +555,7 @@ class LLMService:
                     images[0]["base64"],
                     images[0].get("format", "jpeg"),
                     rules_checklist,
+                    reference_images,
                     stream_callback,
                 ):
                     full_content += chunk
@@ -479,11 +567,35 @@ class LLMService:
             # 格式化规则清单为文本
             checklist_text = self._format_checklist(rules_checklist or [])
 
-            # 构建Prompt
-            system_content = BATCH_AUDIT_PROMPT.format(rules_checklist=checklist_text)
+            # 参考图片提示
+            reference_hint = REFERENCE_IMAGE_PROMPT if reference_images else ""
 
-            # 构建用户消息，包含多张图片
-            user_content = [{"type": "text", "text": f"审核以下{len(images)}张设计稿，输出JSON数组格式的报告。每张图片对应一个对象。"}]
+            # 构建Prompt
+            system_content = BATCH_AUDIT_PROMPT.format(
+                rules_checklist=checklist_text,
+                reference_hint=reference_hint
+            )
+
+            # 构建用户消息
+            user_content = []
+
+            # 先添加参考图片
+            if reference_images:
+                user_content.append({"type": "text", "text": "【标准参考图片】以下是品牌标准Logo，请仔细对比："})
+                for i, ref_img in enumerate(reference_images, 1):
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": ref_img["url"]}
+                    })
+                    desc = ref_img.get("description", "标准Logo")
+                    user_content.append({
+                        "type": "text",
+                        "text": f"参考图片{i}：{desc}"
+                    })
+                user_content.append({"type": "text", "text": "---以上为参考图片，以下为待审核设计稿---"})
+
+            # 添加待审核图片
+            user_content.append({"type": "text", "text": f"审核以下{len(images)}张设计稿，输出JSON数组格式的报告。每张图片对应一个对象。"})
 
             for i, img in enumerate(images):
                 image_url = f"data:image/{img.get('format', 'jpeg')};base64,{img['base64']}"
@@ -502,7 +614,7 @@ class LLMService:
             ]
 
             # 调用LLM流式API
-            logger.info("正在调用API进行流式批量审核...")
+            logger.info(f"正在调用API进行流式批量审核... (参考图片: {len(reference_images or [])}张)")
             full_content = ""
 
             for chunk in self.llm.stream(messages):
