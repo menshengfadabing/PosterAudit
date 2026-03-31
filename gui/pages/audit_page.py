@@ -618,6 +618,7 @@ class AuditPage(ScrollArea):
         # 状态颜色映射
         status_colors = {
             "pass": "#28a745",
+            "review": "#ffc107",
             "warning": "#ffc107",
             "fail": "#dc3545",
             "error": "#6c757d"
@@ -625,6 +626,7 @@ class AuditPage(ScrollArea):
 
         status_labels = {
             "pass": "PASS",
+            "review": "REVIEW",
             "warning": "REVIEW",
             "fail": "FAIL",
             "error": "ERROR"
@@ -735,6 +737,7 @@ class AuditPage(ScrollArea):
         # 状态映射
         status_labels = {
             "pass": "PASS",
+            "review": "REVIEW",
             "warning": "REVIEW",
             "fail": "FAIL",
             "error": "ERROR"
