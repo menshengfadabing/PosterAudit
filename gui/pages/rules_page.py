@@ -1,15 +1,17 @@
 """规范管理页面（Fluent风格）"""
 
 import json
+import base64
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QMetaObject, Q_ARG
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QDialog
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QDialog, QLabel, QScrollArea
+from PySide6.QtGui import QPixmap, QImage
 
 from qfluentwidgets import (
     ScrollArea, StrongBodyLabel, CaptionLabel, BodyLabel,
     PushButton, PrimaryPushButton, ComboBox, LineEdit,
     InfoBar, InfoBarPosition, MessageBox, CardWidget,
-    TitleLabel, FluentIcon as FIF
+    TitleLabel, FluentIcon as FIF, ImageLabel
 )
 
 from src.utils.config import get_app_dir
@@ -94,6 +96,37 @@ class RulesPage(ScrollArea):
         info_layout.addWidget(self.brand_name_label)
         left_layout.addWidget(info_card)
 
+        # 参考图片区域
+        ref_title = StrongBodyLabel("Logo参考图片")
+        left_layout.addWidget(ref_title)
+
+        ref_hint = CaptionLabel("上传标准Logo图片，审核时对比检查")
+        left_layout.addWidget(ref_hint)
+
+        # 参考图片列表容器
+        self.ref_images_card = CardWidget()
+        self.ref_images_card.setBorderRadius(8)
+        ref_images_layout = QVBoxLayout(self.ref_images_card)
+        ref_images_layout.setContentsMargins(12, 12, 12, 12)
+        ref_images_layout.setSpacing(8)
+
+        # 图片列表区域
+        self.ref_images_list = QVBoxLayout()
+        self.ref_images_list.setSpacing(8)
+        ref_images_layout.addLayout(self.ref_images_list)
+
+        # 上传按钮
+        self.upload_ref_btn = PushButton("上传Logo参考图片")
+        self.upload_ref_btn.setIcon(FIF.PHOTO)
+        self.upload_ref_btn.clicked.connect(self._upload_reference_image)
+        ref_images_layout.addWidget(self.upload_ref_btn)
+
+        # 图片计数
+        self.ref_image_count_label = CaptionLabel("已上传 0/5 张")
+        ref_images_layout.addWidget(self.ref_image_count_label)
+
+        left_layout.addWidget(self.ref_images_card)
+
         # 操作按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
@@ -151,6 +184,9 @@ class RulesPage(ScrollArea):
                 self.streaming_display.set_text(markdown_text)
                 self.streaming_display.set_export_enabled(True)
 
+                # 加载参考图片
+                self._load_reference_images(brand_id)
+
                 rules_context.set_current_brand(brand_id)
             else:
                 self._clear_info()
@@ -162,6 +198,7 @@ class RulesPage(ScrollArea):
         self.brand_name_label.setText("品牌名称: --")
         self.streaming_display.clear()
         self.streaming_display.set_export_enabled(False)
+        self._clear_reference_images()
 
     def _format_rules_detail(self, rules) -> str:
         """格式化规范详情显示"""
@@ -677,6 +714,146 @@ class RulesPage(ScrollArea):
             InfoBar.success(
                 title="删除成功",
                 content=f"已删除: {brand_name}",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
+
+    # ============== 参考图片管理 ==============
+
+    def _load_reference_images(self, brand_id: str):
+        """加载参考图片列表"""
+        self._clear_reference_images()
+
+        ref_images = rules_context.get_reference_images(brand_id)
+        self._update_ref_image_count(len(ref_images))
+
+        for ref_img in ref_images:
+            self._add_reference_image_item(ref_img.filename, ref_img.description)
+
+    def _clear_reference_images(self):
+        """清空参考图片列表"""
+        while self.ref_images_list.count():
+            item = self.ref_images_list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._update_ref_image_count(0)
+
+    def _update_ref_image_count(self, count: int):
+        """更新参考图片计数"""
+        self._ref_image_count = count
+        self.ref_image_count_label.setText(f"已上传 {count}/5 张Logo")
+        self.upload_ref_btn.setEnabled(count < 5)
+
+    def _add_reference_image_item(self, filename: str, description: str = ""):
+        """添加参考图片列表项"""
+        item_widget = QWidget()
+        item_layout = QHBoxLayout(item_widget)
+        item_layout.setContentsMargins(0, 0, 0, 0)
+        item_layout.setSpacing(8)
+
+        # 文件名
+        name_label = CaptionLabel(filename[:25] + "..." if len(filename) > 25 else filename)
+        name_label.setToolTip(filename)
+        item_layout.addWidget(name_label, 1)
+
+        # 描述
+        if description:
+            desc_label = CaptionLabel(description[:15] + "..." if len(description) > 15 else description)
+            desc_label.setStyleSheet("color: #888;")
+            item_layout.addWidget(desc_label)
+
+        # 删除按钮
+        delete_btn = PushButton("删除")
+        delete_btn.setIcon(FIF.DELETE)
+        delete_btn.setFixedHeight(28)
+        delete_btn.clicked.connect(lambda: self._delete_reference_image(filename))
+        item_layout.addWidget(delete_btn)
+
+        self.ref_images_list.addWidget(item_widget)
+
+    def _upload_reference_image(self):
+        """上传参考图片"""
+        brand_id = self.rules_combo.currentData()
+        if not brand_id:
+            InfoBar.warning(
+                title="警告",
+                content="请先选择规范",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+
+        # 检查数量限制
+        current_count = getattr(self, '_ref_image_count', 0)
+        if current_count >= 5:
+            InfoBar.warning(
+                title="警告",
+                content="最多只能上传5张Logo参考图片",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择Logo参考图片", "",
+            "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp *.webp);;所有文件 (*.*)"
+        )
+
+        if not file_path:
+            return
+
+        # 读取图片
+        with open(file_path, "rb") as f:
+            image_data = f.read()
+
+        filename = Path(file_path).name
+
+        # 添加到规则
+        ref_image = rules_context.add_reference_image(
+            brand_id=brand_id,
+            image_data=image_data,
+            filename=filename,
+            description="",
+            image_type="logo"
+        )
+
+        if ref_image:
+            self._add_reference_image_item(ref_image.filename)
+            self._update_ref_image_count(current_count + 1)
+
+            InfoBar.success(
+                title="上传成功",
+                content=f"已添加: {filename}",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
+        else:
+            InfoBar.error(
+                title="上传失败",
+                content="添加参考图片失败",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
+    def _delete_reference_image(self, filename: str):
+        """删除参考图片"""
+        brand_id = self.rules_combo.currentData()
+        if not brand_id:
+            return
+
+        if rules_context.delete_reference_image(brand_id, filename):
+            # 重新加载列表
+            self._load_reference_images(brand_id)
+
+            InfoBar.success(
+                title="删除成功",
+                content=f"已删除: {filename}",
                 position=InfoBarPosition.TOP,
                 duration=2000,
                 parent=self

@@ -360,11 +360,17 @@ class AuditService:
             # 获取品牌规范规则清单
             rules_checklist = rules_context.get_rules_checklist(brand_id)
 
+            # 获取参考图片
+            reference_images = rules_context.get_reference_images_data(brand_id)
+            if reference_images:
+                logger.info(f"使用 {len(reference_images)} 张参考图片")
+
             logger.info("调用LLM审核...")
             result = llm_service.audit_image(
                 image_base64=image_base64,
                 image_format=image_format,
                 rules_checklist=rules_checklist,
+                reference_images=reference_images,
                 progress_callback=progress_callback,
             )
 
@@ -434,6 +440,11 @@ class AuditService:
         rules_checklist = rules_context.get_rules_checklist(brand_id)
         rules_text = rules_context.get_rules_text(brand_id)  # 用于计算token
 
+        # 获取参考图片
+        reference_images = rules_context.get_reference_images_data(brand_id)
+        if reference_images:
+            logger.info(f"使用 {len(reference_images)} 张参考图片")
+
         # 计算单次请求可容纳的最大图片数
         if max_images_per_request is None:
             max_images_per_request = llm_service.calculate_max_images(image_sizes, rules_text)
@@ -462,6 +473,7 @@ class AuditService:
             batch_results = llm_service.audit_images_batch_stream(
                 images=batch_images,
                 rules_checklist=rules_checklist,
+                reference_images=reference_images,
                 stream_callback=stream_callback,
             )
 
@@ -484,6 +496,7 @@ class AuditService:
                             image_base64=batch_images[i]["base64"],
                             image_format=batch_images[i]["format"],
                             rules_checklist=rules_checklist,
+                            reference_images=reference_images,
                         )
                         report = self._build_report(single_result, rules_checklist)
                         result_item = {

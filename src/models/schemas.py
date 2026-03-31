@@ -210,6 +210,15 @@ class SourceFile(BaseModel):
     status: str = Field(default="pending", description="状态: pending, parsed, merged")
 
 
+class ReferenceImage(BaseModel):
+    """标准参考图片（Logo等）"""
+    filename: str = Field(..., description="文件名")
+    description: str = Field(default="", description="图片描述（如：标准Logo、Logo变体等）")
+    image_type: str = Field(default="logo", description="图片类型：logo/logo_variant/icon等")
+    file_size: int = Field(default=0, description="文件大小(字节)")
+    upload_time: Optional[datetime] = Field(default=None, description="上传时间")
+
+
 class RuleGroup(BaseModel):
     """规范组"""
     group_id: str = Field(default="", description="规范组ID")
@@ -235,6 +244,9 @@ class BrandRules(BaseModel):
 
     # 次要规范（动态列表）
     secondary_rules: list[SecondaryRule] = Field(default_factory=list, description="次要规范列表")
+
+    # 标准参考图片（Logo等）
+    reference_images: list[ReferenceImage] = Field(default_factory=list, description="标准参考图片列表")
 
     # 兼容旧字段
     copywriting: Optional[CopywritingRules] = Field(default=None, description="文案规范")
