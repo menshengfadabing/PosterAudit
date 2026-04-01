@@ -24,9 +24,17 @@ def setup_logging():
 
 def main():
     """主函数"""
-    # 禁用 QFluentWidgets 的宣传信息
     import os
+
+    # 禁用 QFluentWidgets 的宣传信息
     os.environ['QFLUENTWidgets_DISABLE_TIPS'] = '1'
+
+    # 强制加载 .env 文件（覆盖系统环境变量）
+    app_dir = Path(__file__).parent
+    env_file = app_dir / ".env"
+    if env_file.exists():
+        from dotenv import load_dotenv
+        load_dotenv(env_file, override=True)  # override=True 确保覆盖系统环境变量
 
     # 配置日志
     setup_logging()
@@ -34,14 +42,10 @@ def main():
     logger.info("品牌合规审核平台启动...")
 
     # 设置工作目录
-    import os
     if getattr(sys, 'frozen', False):
         # 打包后的路径
         app_dir = Path(sys.executable).parent
         os.chdir(app_dir)
-    else:
-        # 开发环境
-        app_dir = Path(__file__).parent
 
     # 确保数据目录存在
     from src.utils.config import ensure_data_dirs

@@ -24,6 +24,9 @@ uv run python test/test_core.py
 # Requires test data in data/uploads/
 uv run python test/test_full_flow.py
 
+# Run audit integration tests with local images
+uv run python test/test_audit.py
+
 # Test DeepSeek API connectivity
 uv run python test/test_deepseek.py
 
@@ -33,6 +36,8 @@ pyinstaller build.spec
 # Release: Push a version tag to trigger GitHub Actions cross-platform build
 git tag v1.0.0 && git push --tags
 ```
+
+**Note**: GitHub Actions uses `requirements.txt` with Python 3.11 for cross-platform builds, while local development uses `uv sync` with Python 3.12+. Keep both files in sync when adding dependencies.
 
 ## Architecture
 
@@ -57,15 +62,18 @@ main.py                 # Application entry point, Qt setup, font detection
 All services are singleton instances exported from `src/services/__init__.py`:
 
 - **llm_service** (`LLMService`): LangChain + OpenAI-compatible API for image audit
-  - Key methods: `audit_image()`, `audit_image_stream()`, `audit_images_batch()`, `audit_images_batch_stream()`, `calculate_max_images()`, `test_doubao_connection()`, `test_deepseek_connection()`
+  - Key methods: `audit_image()`, `audit_image_stream()`, `audit_images_batch_stream()`, `calculate_max_images()`, `test_doubao_connection()`, `test_deepseek_connection()`, `_get_next_api_key()`
   - Built-in token estimation for context window management
   - Uses `COMPRESSED_AUDIT_PROMPT` (single image) and `BATCH_AUDIT_PROMPT` (multi-image)
   - Stream methods yield text chunks; use `parse_stream_result()` to parse complete JSON
+  - **Multi-Key support**: `_get_next_api_key()` rotates through configured API keys
 
 - **audit_service** (`AuditService`): Image preprocessing and audit orchestration
-  - Key methods: `audit()`, `audit_file()`, `batch_audit_concurrent()`, `batch_audit_merged()`
+  - Key methods: `audit()`, `audit_file()`, `batch_audit_merged()` (primary), `_fallback_concurrent()`
   - Handles image compression with presets: `high_quality`, `balanced`, `high_compression`, `no_compression`
   - `preprocess_image()` compresses/resizes images before API calls
+  - **batch_audit_merged**: Combines images per request + ThreadPoolExecutor parallel batches
+  - `_is_result_incomplete()`: Detects truncated output, triggers auto-retry
 
 - **document_parser** (`DocumentParser`): Extracts text from documents, uses LLM to parse into BrandRules
   - Supports: PDF, PPT, PPTX, DOC, DOCX, XLS, XLSX, MD, TXT
@@ -76,6 +84,13 @@ All services are singleton instances exported from `src/services/__init__.py`:
   - Key methods: `get_rules()`, `add_rules()`, `get_rules_checklist()`, `get_rules_text()`, `set_current_brand()`
   - Persists rules to `data/rules/{brand_id}/current.json`
 
+### Reference Images Feature
+
+Brands can include standard reference images (Logo variants, icons) for visual comparison:
+- Stored in `BrandRules.reference_images` as `ReferenceImage` objects
+- `llm_service` appends `REFERENCE_IMAGE_PROMPT` when reference images are provided
+- LLM compares uploaded design's Logo against reference to detect deformation/color errors
+
 ### Dual-Model Architecture
 
 1. **DeepSeek** (text-only): Parses brand guideline documents into structured rules
@@ -83,33 +98,42 @@ All services are singleton instances exported from `src/services/__init__.py`:
    - Used by `document_parser._extract_rules_with_llm()`
 
 2. **Doubao** (multimodal): Audits images against brand rules
-   - Config: `openai_api_key`, `openai_api_base`, `doubao_model`
-   - Used by `llm_service.audit_image()` and `llm_service.audit_images_batch()`
+   - Config: `openai_api_key` (single) or `openai_api_keys` (comma-separated) or `OPENAI_API_KEY_0/1/2...` (indexed)
+   - Used by `llm_service.audit_image()` and `llm_service.audit_images_batch_stream()`
+   - **Multi-Key rotation**: `settings.get_openai_api_keys()` returns list; `_get_next_api_key()` cycles through
 
-### Batch Audit Modes
+### Batch Audit Strategy (Merge + Parallel)
 
-Two approaches for batch processing in `AuditService`:
+`batch_audit_merged()` is the primary batch processing method, combining two strategies:
 
-1. **`batch_audit_concurrent()`**: Multiple parallel API calls (default `max_concurrent=5`)
-   - Each image gets its own API request
-   - Uses `ThreadPoolExecutor` for concurrency
-   - Supports `result_callback` for streaming results
+1. **Merge**: Single API call processes multiple images (batch size configurable in GUI: 3/5/8/10 or auto)
+2. **Parallel**: ThreadPoolExecutor runs multiple batches concurrently
+   - Each batch uses different API Key (round-robin rotation)
+   - Concurrent workers = min(batch_count, key_count)
 
-2. **`batch_audit_merged()`**: Single merged request with multiple images
-   - Auto-calculates `max_images_per_request` based on token limits
-   - Falls back to single-image audit if batch fails
-   - More efficient for small batches with good token management
-   - Max images capped at 10 per request (safety limit)
+Flow:
+```
+9 images → 3 batches (3 each) → parallel execution
+Batch 1 → Key #1 → single API call for 3 images
+Batch 2 → Key #2 → single API call for 3 images  } concurrent
+Batch 3 → Key #3 → single API call for 3 images
+```
+
+Fallback: If merged request fails, `_fallback_concurrent()` processes images individually.
+
+**Simplified Output Format**: LLM returns `{"id": "Rule_N", "s": "p|f|r", "c": 0.0-1.0}` instead of full `status/confidence/detail`, saving ~70% tokens.
+
+**Output Token Estimation**: `OUTPUT_TOKENS_PER_IMAGE = 500` (simplified format, down from 2000).
 
 ### Token Estimation
 
 `LLMService.calculate_max_images()` dynamically computes batch size based on:
 1. **Input context window** (128k default): system prompt + rules + image tiles
-2. **Output token limit** (8k default, configurable to 16k): each image ~2000 tokens output
-   - Output limit is often the real bottleneck for batch processing
+2. **Output token limit** (8k default): each image ~500 tokens output (simplified format)
 3. **Image tile calculation**: 85 base tokens + 170 per 512×512 tile
 
-Use this when planning batch operations to avoid truncation errors.
+With simplified output format, max images per request increased from ~4 to ~16 (output limit 8k / 500 tokens).
+GUI allows user override: auto/3/5/8/10 per batch.
 
 ### Data Flow
 
@@ -147,8 +171,10 @@ The `rules_context.get_rules_checklist(brand_id)` generates a structured checkli
 Environment variables via `.env` file (see `.env.example`):
 
 ```env
-# Multimodal model (image audit)
-OPENAI_API_KEY=your_key
+# Multimodal model (image audit) - Multi-Key supported
+OPENAI_API_KEY_0=your_key_1
+OPENAI_API_KEY_1=your_key_2
+OPENAI_API_KEY_2=your_key_3
 OPENAI_API_BASE=https://ark.cn-beijing.volces.com/api/v3
 DOUBAO_MODEL=doubao-seed-2-0-pro-260215
 
@@ -160,6 +186,11 @@ DEEPSEEK_MODEL=deepseek-v3-2-251201
 # Optional proxy
 HTTPS_PROXY=socks5://127.0.0.1:1080
 ```
+
+**Multi-API Key priority** (in `settings.get_openai_api_keys()`):
+1. `OPENAI_API_KEYS` (comma-separated)
+2. `OPENAI_API_KEY_0/1/2...` (indexed format)
+3. `OPENAI_API_KEY` (single key fallback)
 
 Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/exports/`, `data/uploads/`
 
@@ -178,6 +209,8 @@ Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/expor
 - Sidebar navigation uses `addSubInterface()` and switches `QStackedWidget` pages
 - Chinese font auto-detection in `main.py`
 - Responsive scaling via `gui/utils/responsive.py`
+- **Settings page**: Multi-API key management with add/remove/test buttons
+- **Audit page**: Batch size selection (auto/3/5/8/10), compression preset
 
 ## Test Structure
 
@@ -186,3 +219,20 @@ Data directories auto-created: `data/rules/`, `data/audit_history/`, `data/expor
 - `test/test_audit.py`: Integration tests for audit functionality with local images
 - `test/test_deepseek.py`: DeepSeek API connectivity verification
 - `test/lm_test.py`: LM Studio local model connection testing (OpenAI-compatible API)
+
+## Prompt Templates
+
+Audit prompts defined in `src/services/llm_service.py`:
+
+- **`COMPRESSED_AUDIT_PROMPT`**: Single image audit - returns JSON with `results` array (simplified format)
+- **`BATCH_AUDIT_PROMPT`**: Multi-image audit - returns JSON array with `idx` for each result
+- **`REFERENCE_IMAGE_PROMPT`**: Instructions for LLM to compare Logo against reference images
+
+**Simplified Output Format** (both prompts):
+```json
+{"id": "Rule_N", "s": "p|f|r", "c": 0.0-1.0}
+```
+- `s`: status (p=pass, f=fail, r=review)
+- `c`: confidence (0.0-1.0)
+
+Results sorted by status: FAIL → REVIEW → PASS in `_build_rule_checks()`.

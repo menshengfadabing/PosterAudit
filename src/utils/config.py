@@ -48,7 +48,8 @@ class Settings(BaseSettings):
 
     # 海报分析模型（多模态）
     openai_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
-    openai_api_key: str = ""
+    openai_api_key: str = ""  # 单个 Key（兼容旧配置）
+    openai_api_keys: str = ""  # 多个 Key，逗号分隔（新配置，优先使用）
     doubao_model: str = "doubao-seed-2-0-pro-260215"
 
     # 应用配置
@@ -78,6 +79,31 @@ class Settings(BaseSettings):
             self.brand_rules_path = str(app_dir / "config" / "brand_rules.json")
         if not self.data_dir:
             self.data_dir = str(app_dir / "data")
+
+    def get_openai_api_keys(self) -> list[str]:
+        """获取 OpenAI API Key 列表（支持多 Key）"""
+        import os
+
+        # 优先级 1: OPENAI_API_KEYS 环境变量（逗号分隔）
+        if self.openai_api_keys:
+            keys = [k.strip() for k in self.openai_api_keys.split(",") if k.strip()]
+            if keys:
+                return keys
+
+        # 优先级 2: OPENAI_API_KEY_0, OPENAI_API_KEY_1, ... 格式
+        indexed_keys = []
+        for i in range(10):  # 支持最多 10 个 Key
+            key = os.getenv(f"OPENAI_API_KEY_{i}", "")
+            if key and key.strip():
+                indexed_keys.append(key.strip())
+        if indexed_keys:
+            return indexed_keys
+
+        # 优先级 3: 单 Key 配置
+        if self.openai_api_key:
+            return [self.openai_api_key]
+
+        return []
 
 
 class BrandRulesLoader:

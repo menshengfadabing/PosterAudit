@@ -19,12 +19,12 @@ from src.models.schemas import (
     FontInfo,
     LayoutInfo,
     StyleScore,
-    CheckItem,
     AuditStatus,
     RuleCheckItem,
 )
-from src.services.llm_service import llm_service
+from src.services.llm_service import llm_service, COMPRESSED_AUDIT_PROMPT, REFERENCE_IMAGE_PROMPT
 from src.services.rules_context import rules_context
+from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +88,12 @@ class AuditService:
 
     def preprocess_image(self, image_data: bytes | str, image_format: str = "png") -> tuple[str, str]:
         """
-        预处理图片 - 智能压缩以节省Token和传输时间
+        预处理图片 - 压缩以节省 Token 和传输时间
 
-        智能压缩策略：
-        1. 分析原图属性（格式、尺寸、大小、质量）
-        2. 根据原图情况动态决定压缩策略
-        3. 只在确实能减小体积时才压缩
-        4. 避免反向压缩（压缩后比原图大）
+        简化策略：
+        1. 控制尺寸：限制最大边长
+        2. 控制大小：限制文件大小
+        3. 格式转换：统一输出为 JPEG
 
         Args:
             image_data: 图片数据（bytes或base64字符串）
@@ -105,7 +104,7 @@ class AuditService:
         """
         config = self._compression_config
 
-        # 解码输入
+        # 1. 解码输入
         if isinstance(image_data, str):
             if image_data.startswith("data:"):
                 import re
@@ -121,212 +120,79 @@ class AuditService:
         original_bytes = len(image_data)
         original_kb = original_bytes / 1024
 
+        # 打开图片
         img = Image.open(BytesIO(image_data))
         original_size = img.size
-        original_format = image_format.lower()
-        if original_format == "jpg":
-            original_format = "jpeg"
 
-        # 如果禁用压缩，直接返回
+        # 标准化格式名
+        image_format = image_format.lower()
+        if image_format == "jpg":
+            image_format = "jpeg"
+
+        # 2. 如果禁用压缩，直接返回
         if not config.get("enabled", True):
-            logger.info(f"压缩已禁用，原图: {original_size}, {original_kb:.1f}KB, 格式: {original_format}")
-            return base64.b64encode(image_data).decode(), original_format
-
-        # ===== 分析原图属性 =====
-
-        # 检测原图是否为JPEG及其质量估算
-        is_original_jpeg = original_format == "jpeg"
-        estimated_quality = self._estimate_jpeg_quality(image_data) if is_original_jpeg else None
-
-        # 分析PNG是否适合转换为JPEG
-        is_png_with_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
-        png_to_jpeg_potential = original_format == "png" and not is_png_with_alpha
-
-        logger.info(f"原图分析: {original_size}, {original_kb:.1f}KB, 格式={original_format}, "
-                    f"mode={img.mode}, JPEG质量≈{estimated_quality}, 有Alpha={is_png_with_alpha}")
-
-        # ===== 智能决策：是否需要处理 =====
+            logger.debug(f"压缩已禁用: {original_size}, {original_kb:.1f}KB")
+            return base64.b64encode(image_data).decode(), image_format
 
         max_dimension = config.get("max_dimension", 1920)
         max_file_size = config.get("max_file_size", 500_000)
-        target_quality = config.get("quality", 75)
+        quality = config.get("quality", 75)
 
-        # 决策因子
+        # 3. 检查是否需要处理
         needs_resize = max(img.size) > max_dimension
-        needs_quality_reduction = False
-        needs_format_conversion = False
+        needs_compress = original_bytes > max_file_size
 
-        # 1. 尺寸决策：只有原图大于max_dimension才需要缩放
-        if needs_resize:
-            logger.info(f"需要缩放: {max(img.size)} > {max_dimension}")
-        else:
-            logger.info(f"尺寸合适: {max(img.size)} <= {max_dimension}, 无需缩放")
+        if not needs_resize and not needs_compress:
+            logger.debug(f"无需处理: {original_size}, {original_kb:.1f}KB")
+            return base64.b64encode(image_data).decode(), image_format
 
-        # 2. 质量决策：对比原图质量和目标质量
-        if is_original_jpeg and estimated_quality:
-            if estimated_quality <= target_quality:
-                # 原图质量已经低于或等于目标，不需要降低质量
-                logger.info(f"质量合适: 原图≈{estimated_quality} <= 目标{target_quality}, 无需降低质量")
-            else:
-                # 原图质量高于目标，需要降低
-                needs_quality_reduction = True
-                logger.info(f"需要降质: 原图≈{estimated_quality} > 目标{target_quality}")
+        logger.info(f"预处理: {original_size}, {original_kb:.1f}KB -> "
+                    f"max_dim={max_dimension}, max_size={max_file_size/1024:.0f}KB")
 
-        # 3. 格式转换决策：PNG转JPEG可能节省空间
-        if png_to_jpeg_potential:
-            # PNG无损转JPEG有损，通常能节省空间（除非PNG本身很小）
-            needs_format_conversion = True
-            logger.info(f"建议转换: PNG无Alpha -> JPEG (可能节省空间)")
-
-        # 4. 文件大小决策：原图是否已满足大小要求
-        if original_bytes <= max_file_size and not needs_resize:
-            # 原图大小已满足要求且尺寸合适，检查是否还需要处理
-            if is_original_jpeg and estimated_quality and estimated_quality <= target_quality:
-                # JPEG质量也合适 -> 无需处理，直接返回原图
-                logger.info(f"原图已满足所有要求: {original_kb:.1f}KB <= {max_file_size/1024:.1f}KB, "
-                            f"尺寸合适, 质量≈{estimated_quality}, 直接返回原图")
-                return base64.b64encode(image_data).decode(), original_format
-            elif png_to_jpeg_potential and original_kb > 50:
-                # PNG较大，转JPEG可能更小，继续处理
-                needs_format_conversion = True
-            else:
-                # 其他情况，原图满足要求
-                logger.info(f"原图大小合适: {original_kb:.1f}KB <= {max_file_size/1024:.1f}KB, 尺寸合适, 返回原图")
-                return base64.b64encode(image_data).decode(), original_format
-
-        # ===== 执行压缩 =====
-
-        # 如果没有任何处理需求，直接返回原图
-        if not needs_resize and not needs_quality_reduction and not needs_format_conversion:
-            # 但可能需要检查是否超过大小限制
-            if original_bytes <= max_file_size:
-                logger.info(f"无需任何处理，直接返回原图")
-                return base64.b64encode(image_data).decode(), original_format
-
-        # 转换为RGB模式
-        if img.mode in ("RGBA", "P", "LA", "L"):
+        # 4. 转换为 RGB 模式（去除 Alpha 通道）
+        if img.mode in ("RGBA", "LA"):
+            # 白色背景合成
+            background = Image.new("RGB", img.size, (255, 255, 255))
             if img.mode == "RGBA":
+                background.paste(img, mask=img.split()[-1])
+            else:
+                background.paste(img, mask=img.split()[-1])
+            img = background
+        elif img.mode == "P":
+            if "transparency" in img.info:
+                img = img.convert("RGBA")
                 background = Image.new("RGB", img.size, (255, 255, 255))
                 background.paste(img, mask=img.split()[-1])
                 img = background
-            elif img.mode == "P":
-                if "transparency" in img.info:
-                    img = img.convert("RGBA")
-                    background = Image.new("RGB", img.size, (255, 255, 255))
-                    background.paste(img, mask=img.split()[-1])
-                    img = background
-                else:
-                    img = img.convert("RGB")
             else:
                 img = img.convert("RGB")
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
 
-        # 缩放（仅在需要时）
+        # 5. 缩放（仅在需要时）
         if needs_resize:
             ratio = max_dimension / max(img.size)
             new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
-            logger.info(f"图片缩放: {original_size} -> {img.size}")
+            logger.debug(f"缩放: {original_size} -> {img.size}")
 
-        # 动态调整压缩质量
-        # 如果原图是高质量JPEG，用目标质量压缩；如果原图质量已经较低，保持相近质量
-        actual_quality = target_quality
-        if is_original_jpeg and estimated_quality and not needs_quality_reduction:
-            # 原图质量合适，保持相近质量（略微降低以补偿重编码开销）
-            actual_quality = min(estimated_quality, target_quality)
-            logger.info(f"保持相近质量: actual_quality={actual_quality}")
-
-        # 压缩为JPEG
+        # 6. 压缩为 JPEG
         buffer = BytesIO()
-        img.save(buffer, format="JPEG", quality=actual_quality, optimize=True)
+        img.save(buffer, format="JPEG", quality=quality, optimize=True)
 
-        compressed_bytes = len(buffer.getvalue())
-        compressed_kb = compressed_bytes / 1024
-
-        # ===== 压缩效果检查 =====
-
-        # 如果压缩后比原图大，且原图满足大小和尺寸要求，返回原图
-        if compressed_bytes > original_bytes:
-            if original_bytes <= max_file_size and not needs_resize:
-                logger.warning(f"压缩效果不佳: {compressed_kb:.1f}KB > {original_kb:.1f}KB, 返回原图")
-                return base64.b64encode(image_data).decode(), original_format
-            else:
-                # 原图超限，即使压缩后更大也得用（通常是尺寸缩放导致）
-                logger.warning(f"压缩后变大但原图超限: {compressed_kb:.1f}KB > {original_kb:.1f}KB, "
-                               f"原图{original_kb:.1f}KB > {max_file_size/1024:.1f}KB 或尺寸超限")
-
-        # 如果仍然超过大小限制，进一步降低质量
-        if compressed_bytes > max_file_size:
-            # 计算需要的质量（保守估计）
-            new_quality = max(40, int(actual_quality * 0.8 * max_file_size / compressed_bytes))
+        # 如果仍然太大，降低质量再压缩
+        if len(buffer.getvalue()) > max_file_size:
+            lower_quality = max(40, int(quality * 0.7))
             buffer = BytesIO()
-            img.save(buffer, format="JPEG", quality=new_quality, optimize=True)
-            compressed_bytes = len(buffer.getvalue())
-            compressed_kb = compressed_bytes / 1024
-            logger.info(f"二次压缩: quality={new_quality}, size={compressed_kb:.1f}KB")
+            img.save(buffer, format="JPEG", quality=lower_quality, optimize=True)
+            logger.debug(f"二次压缩: quality={lower_quality}")
 
-            # 再次检查是否比原图大
-            if compressed_bytes > original_bytes and original_bytes <= max_file_size:
-                logger.warning(f"二次压缩仍比原图大: {compressed_kb:.1f}KB > {original_kb:.1f}KB, 返回原图")
-                return base64.b64encode(image_data).decode(), original_format
+        compressed_kb = len(buffer.getvalue()) / 1024
+        compression_ratio = (1 - len(buffer.getvalue()) / original_bytes) * 100 if original_bytes > 0 else 0
 
-        # 记录压缩效果
-        compression_ratio = (1 - compressed_kb / original_kb) * 100 if original_kb > 0 else 0
-        logger.info(f"压缩完成: {original_kb:.1f}KB -> {compressed_kb:.1f}KB "
-                    f"(节省{compression_ratio:.1f}%, 质量={actual_quality})")
+        logger.info(f"压缩完成: {original_kb:.1f}KB -> {compressed_kb:.1f}KB (节省{compression_ratio:.0f}%)")
 
-        image_base64 = base64.b64encode(buffer.getvalue()).decode()
-        return image_base64, "jpeg"
-
-    def _estimate_jpeg_quality(self, image_data: bytes) -> int | None:
-        """
-        估算JPEG图片的质量值
-
-        通过分析JPEG文件的量化表来估算编码时使用的质量参数
-
-        Args:
-            image_data: JPEG图片的二进制数据
-
-        Returns:
-            估算的质量值（1-100），如果无法估算返回None
-        """
-        try:
-            # PIL没有直接提供质量信息，通过文件大小和尺寸估算
-            img = Image.open(BytesIO(image_data))
-            width, height = img.size
-            file_size = len(image_data)
-
-            # 计算每像素字节数
-            pixels = width * height
-            bytes_per_pixel = file_size / pixels if pixels > 0 else 0
-
-            # 根据每像素字节数估算质量（经验公式）
-            # JPEG质量与压缩率大致对应：
-            # quality 90-100: ~2-4 bytes/pixel (高质量)
-            # quality 75-85:  ~0.8-2 bytes/pixel (中等)
-            # quality 50-70:  ~0.3-0.8 bytes/pixel (低质量)
-            # quality <50:    ~0.1-0.3 bytes/pixel (极低)
-
-            if bytes_per_pixel >= 2.5:
-                estimated = 95
-            elif bytes_per_pixel >= 1.5:
-                estimated = 85
-            elif bytes_per_pixel >= 0.8:
-                estimated = 75
-            elif bytes_per_pixel >= 0.5:
-                estimated = 60
-            elif bytes_per_pixel >= 0.3:
-                estimated = 50
-            else:
-                estimated = 40
-
-            logger.debug(f"JPEG质量估算: {file_size}字节, {width}x{height}, "
-                        f"{bytes_per_pixel:.2f}bytes/pixel -> quality≈{estimated}")
-
-            return estimated
-
-        except Exception as e:
-            logger.warning(f"JPEG质量估算失败: {e}")
-            return None
+        return base64.b64encode(buffer.getvalue()).decode(), "jpeg"
 
     def audit_file(self, file_path: str | Path, brand_id: str | None = None) -> AuditReport:
         """审核本地文件"""
@@ -454,101 +320,174 @@ class AuditService:
         batches = [images[i:i + max_images_per_request] for i in range(0, len(images), max_images_per_request)]
         batch_paths = [image_paths[i:i + max_images_per_request] for i in range(0, len(image_paths), max_images_per_request)]
 
-        logger.info(f"分为 {len(batches)} 批次处理")
+        logger.info(f"分为 {len(batches)} 批次处理（并行执行）")
 
         # 计算每张图片在总列表中的索引
         path_to_index = {path: i for i, path in enumerate(image_paths)}
 
-        for batch_idx, (batch_images, batch_path_list) in enumerate(zip(batches, batch_paths)):
-            batch_start = time.time()
+        # 获取 API Keys
+        api_keys = settings.get_openai_api_keys()
+        if not api_keys:
+            api_keys = [settings.openai_api_key] if settings.openai_api_key else []
+
+        def process_batch(args: tuple) -> tuple:
+            """处理单个批次"""
+            batch_idx, batch_images, batch_path_list = args
             batch_num = batch_idx + 1
             total_batches = len(batches)
+            batch_start = time.time()
 
-            if progress_callback:
-                progress_callback(len(results), total, f"正在审核批次 {batch_num}/{total_batches}...")
+            # 选择 API Key（轮询）
+            api_key = None
+            if api_keys:
+                api_key = api_keys[batch_idx % len(api_keys)]
+                logger.info(f"批次 {batch_num}: 使用 API Key #{batch_idx % len(api_keys) + 1}")
 
             logger.info(f"处理第 {batch_num}/{total_batches} 批，共 {len(batch_images)} 张图片")
 
-            # 调用LLM流式批量审核
-            batch_results = llm_service.audit_images_batch_stream(
-                images=batch_images,
-                rules_checklist=rules_checklist,
-                reference_images=reference_images,
-                stream_callback=stream_callback,
-            )
+            try:
+                # 调用 LLM 批量审核
+                batch_results = llm_service.audit_images_batch_stream(
+                    images=batch_images,
+                    rules_checklist=rules_checklist,
+                    reference_images=reference_images,
+                    stream_callback=None,  # 并行时不支持流式
+                    api_key=api_key,  # 指定 API Key
+                )
 
-            batch_time = time.time() - batch_start
-            logger.info(f"批次 {batch_num} 完成，耗时: {batch_time:.1f}秒")
+                batch_time = time.time() - batch_start
+                logger.info(f"批次 {batch_num} 完成，耗时: {batch_time:.1f}秒")
 
-            # 检查是否有有效结果（如果全部失败则回退到单图审核）
-            has_valid_result = any(
-                r.get("score", 0) > 0 or r.get("status") != "fail"
-                for r in batch_results
-            )
+                # 检查是否有有效结果
+                has_valid_result = any(
+                    r.get("score", 0) > 0 or r.get("status") != "fail"
+                    for r in batch_results
+                )
 
-            if not has_valid_result and len(batch_images) > 1:
-                logger.warning(f"批次 {batch_num} 合并请求全部失败，回退到单图审核")
-                # 回退到单图审核
+                if not has_valid_result and len(batch_images) > 1:
+                    logger.warning(f"批次 {batch_num} 合并请求失败，回退到并发审核")
+                    # 回退处理
+                    fallback_results = self._fallback_concurrent(
+                        batch_images=batch_images,
+                        batch_path_list=batch_path_list,
+                        brand_id=brand_id,
+                        rules_checklist=rules_checklist,
+                        reference_images=reference_images,
+                        max_concurrent=min(len(batch_images), 5)
+                    )
+                    return batch_idx, fallback_results
+
+                # 转换结果格式，并检测不完整结果
+                batch_result_items = []
+                retry_items = []  # 需要重试的图片
+
                 for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
                     try:
-                        # 单独审核每张图片
-                        single_result = llm_service.audit_image(
-                            image_base64=batch_images[i]["base64"],
-                            image_format=batch_images[i]["format"],
-                            rules_checklist=rules_checklist,
-                            reference_images=reference_images,
-                        )
-                        report = self._build_report(single_result, rules_checklist)
-                        result_item = {
-                            "file_name": Path(path).name,
-                            "status": "success",
-                            "report": report
-                        }
-                        results.append(result_item)
-                        # 流式返回，使用正确的索引
-                        if result_callback:
-                            idx = path_to_index.get(path, len(results) - 1)
-                            result_callback(result_item, idx, len(results), total)
-                    except Exception as e:
-                        logger.error(f"单图审核失败 [{path}]: {e}")
-                        result_item = {
-                            "file_name": Path(path).name,
-                            "status": "error",
-                            "error": str(e)
-                        }
-                        results.append(result_item)
-                        if result_callback:
-                            idx = path_to_index.get(path, len(results) - 1)
-                            result_callback(result_item, idx, len(results), total)
-            else:
-                # 转换结果格式
-                for i, (result, path) in enumerate(zip(batch_results, batch_path_list)):
-                    try:
+                        # 检查结果是否不完整
+                        if self._is_result_incomplete(result, rules_checklist):
+                            logger.warning(f"图片 {Path(path).name} 审核结果不完整，将尝试单独重审")
+                            retry_items.append((i, path, batch_images[i]))
+                            continue
+
                         report = self._build_report(result, rules_checklist)
                         result_item = {
                             "file_name": Path(path).name,
                             "status": "success",
                             "report": report
                         }
-                        results.append(result_item)
-                        # 流式返回，使用正确的索引
-                        if result_callback:
-                            idx = path_to_index.get(path, len(results) - 1)
-                            result_callback(result_item, idx, len(results), total)
+                        batch_result_items.append(result_item)
                     except Exception as e:
                         logger.error(f"结果转换失败 [{path}]: {e}")
-                        result_item = {
+                        batch_result_items.append({
                             "file_name": Path(path).name,
                             "status": "error",
                             "error": str(e)
-                        }
-                        results.append(result_item)
-                        if result_callback:
-                            idx = path_to_index.get(path, len(results) - 1)
-                            result_callback(result_item, idx, len(results), total)
+                        })
 
-            if progress_callback:
-                progress_callback(len(results), total, f"已完成 {len(results)}/{total}")
+                # 对不完整结果进行单独重审
+                if retry_items:
+                    logger.info(f"对 {len(retry_items)} 张不完整结果的图片进行单独重审...")
+                    for orig_idx, path, img_data in retry_items:
+                        try:
+                            # 选择不同的 API Key 重试
+                            retry_key = api_keys[(batch_idx + 1) % len(api_keys)] if api_keys else None
+
+                            single_result = llm_service.audit_image(
+                                image_base64=img_data["base64"],
+                                image_format=img_data.get("format", "jpeg"),
+                                rules_checklist=rules_checklist,
+                                reference_images=reference_images,
+                                api_key=retry_key,
+                            )
+                            report = self._build_report(single_result, rules_checklist)
+                            batch_result_items.append({
+                                "file_name": Path(path).name,
+                                "status": "success",
+                                "report": report
+                            })
+                            logger.info(f"单独重审完成: {Path(path).name}")
+                        except Exception as e:
+                            logger.error(f"单独重审失败 [{path}]: {e}")
+                            batch_result_items.append({
+                                "file_name": Path(path).name,
+                                "status": "error",
+                                "error": f"重审失败: {str(e)}"
+                            })
+
+                return batch_idx, batch_result_items
+
+            except Exception as e:
+                logger.error(f"批次 {batch_num} 处理失败: {e}")
+                # 返回错误结果
+                error_results = []
+                for path in batch_path_list:
+                    error_results.append({
+                        "file_name": Path(path).name,
+                        "status": "error",
+                        "error": str(e)
+                    })
+                return batch_idx, error_results
+
+        # 并行处理所有批次
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        batch_results_map = {}  # batch_idx -> results
+
+        # 计算并发数：批次数量和 Key 数量的较小值
+        max_concurrent = min(len(batches), len(api_keys)) if api_keys else len(batches)
+        logger.info(f"并发处理 {len(batches)} 个批次，最大并发数: {max_concurrent}")
+
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = {
+                executor.submit(process_batch, (i, batch, paths)): i
+                for i, (batch, paths) in enumerate(zip(batches, batch_paths))
+            }
+
+            completed = 0
+            for future in as_completed(futures):
+                batch_idx, batch_results = future.result()
+                batch_results_map[batch_idx] = batch_results
+                completed += 1
+
+                if progress_callback:
+                    # 计算已完成图片数
+                    completed_images = sum(
+                        len(batch_results_map.get(i, []))
+                        for i in range(completed)
+                    )
+                    progress_callback(completed_images, total, f"已完成 {completed}/{len(batches)} 批次")
+
+        # 按批次顺序合并结果
+        for batch_idx in range(len(batches)):
+            batch_results = batch_results_map.get(batch_idx, [])
+            batch_paths_list = batch_paths[batch_idx]
+
+            for i, result_item in enumerate(batch_results):
+                results.append(result_item)
+                if result_callback and i < len(batch_paths_list):
+                    # 使用原始路径获取索引
+                    idx = path_to_index.get(batch_paths_list[i], len(results) - 1)
+                    result_callback(result_item, idx, len(results), total)
 
         total_time = time.time() - start_time
         logger.info(f"合并请求批量审核完成: 总耗时: {total_time:.1f}秒, 平均每张: {total_time/total:.1f}秒")
@@ -621,19 +560,6 @@ class AuditService:
             style=style,
         )
 
-        # 构建检查项
-        checks = {}
-        for check_type, items in result.get("checks", {}).items():
-            checks[check_type] = [
-                CheckItem(
-                    code=item.get("code", ""),
-                    name=item.get("name", ""),
-                    status=item.get("status", "pass"),
-                    detail=item.get("detail", ""),
-                )
-                for item in items
-            ]
-
         # 构建规则检查清单
         rule_checks = self._build_rule_checks(result, rules_checklist)
 
@@ -686,49 +612,330 @@ class AuditService:
             score=final_score,
             status=AuditStatus(final_status),
             detection=detection,
-            checks=checks,
             rule_checks=rule_checks,
             issues=issues,
             summary=result.get("summary", ""),
         )
 
     def _build_rule_checks(self, result: dict, rules_checklist: list[dict] = None) -> list[RuleCheckItem]:
-        """构建规则检查清单"""
+        """构建规则检查清单（从精简格式转换）"""
         rule_checks = []
 
-        # 从 LLM 结果获取 rule_checks
-        llm_rule_checks = result.get("rule_checks", [])
+        # 从 LLM 结果获取 results（精简格式）
+        llm_results = result.get("results", [])
+
+        # 兼容旧格式 rule_checks
+        if not llm_results:
+            llm_results = result.get("rule_checks", [])
 
         # 如果有规则清单，按清单顺序构建结果
         if rules_checklist:
             # 创建 rule_id -> llm_result 的映射
-            llm_results_map = {r.get("rule_id"): r for r in llm_rule_checks}
+            llm_results_map = {r.get("id") or r.get("rule_id"): r for r in llm_results}
+
+            # 检测输出不完整的情况
+            missing_rules = []
+            for rule in rules_checklist:
+                rule_id = rule.get("rule_id", "")
+                if rule_id not in llm_results_map:
+                    missing_rules.append(rule_id)
+
+            if missing_rules:
+                logger.warning(f"LLM 输出不完整，缺少 {len(missing_rules)} 条规则结果")
 
             for rule in rules_checklist:
                 rule_id = rule.get("rule_id", "")
                 llm_result = llm_results_map.get(rule_id, {})
 
+                # 解析状态（支持精简格式 s 和旧格式 status）
+                status_raw = llm_result.get("s") or llm_result.get("status", "")
+                # 精简格式转换: p->pass, f->fail, r->review
+                status_map = {"p": "pass", "f": "fail", "r": "review"}
+                status = status_map.get(status_raw, status_raw) if status_raw else "review"
+
+                # 解析置信度
+                confidence = llm_result.get("c") or llm_result.get("confidence", 0.0) or 0.0
+
                 rule_checks.append(RuleCheckItem(
                     rule_id=rule_id,
                     rule_content=rule.get("content", ""),
-                    status=llm_result.get("status", "review") if llm_result else "review",
+                    status=status,
                     reference=rule.get("reference", ""),
-                    confidence=llm_result.get("confidence", 0.0) if llm_result else 0.0,
-                    detail=llm_result.get("detail", "") if llm_result else "未能获取审核结果",
+                    confidence=confidence,
+                    detail="",  # 精简格式不再输出 detail
                 ))
         else:
             # 没有规则清单，直接使用 LLM 返回的结果
-            for r in llm_rule_checks:
+            for r in llm_results:
+                status_raw = r.get("s") or r.get("status", "review")
+                status_map = {"p": "pass", "f": "fail", "r": "review"}
+                status = status_map.get(status_raw, status_raw) if status_raw else "review"
+
                 rule_checks.append(RuleCheckItem(
-                    rule_id=r.get("rule_id", ""),
+                    rule_id=r.get("id") or r.get("rule_id", ""),
                     rule_content=r.get("rule_content", ""),
-                    status=r.get("status", "review"),
+                    status=status,
                     reference=r.get("reference", ""),
-                    confidence=r.get("confidence", 0.0),
-                    detail=r.get("detail", ""),
+                    confidence=r.get("c") or r.get("confidence", 0.0) or 0.0,
+                    detail=r.get("d") or r.get("detail", ""),
                 ))
 
+        # 按状态排序：FAIL -> REVIEW -> PASS（红黄绿）
+        status_order = {"fail": 0, "review": 1, "pass": 2}
+        rule_checks.sort(key=lambda x: status_order.get(x.status, 1))
+
         return rule_checks
+
+    def _is_result_incomplete(self, result: dict, rules_checklist: list[dict] = None) -> bool:
+        """检查审核结果是否不完整"""
+        if not rules_checklist:
+            return False
+
+        llm_results = result.get("results", []) or result.get("rule_checks", [])
+        llm_results_map = {r.get("id") or r.get("rule_id"): r for r in llm_results}
+
+        # 计算缺失比例
+        missing_count = sum(1 for r in rules_checklist if r.get("rule_id") not in llm_results_map)
+        total_count = len(rules_checklist)
+
+        # 超过 50% 缺失视为不完整
+        if total_count > 0 and missing_count / total_count > 0.5:
+            logger.warning(f"审核结果不完整: {missing_count}/{total_count} 条规则缺失")
+            return True
+
+        return False
+
+    def _fallback_concurrent(
+        self,
+        batch_images: list[dict],
+        batch_path_list: list[str],
+        brand_id: str | None = None,
+        rules_checklist: list[dict] = None,
+        reference_images: list[dict] = None,
+        max_concurrent: int = 5,
+    ) -> list[dict]:
+        """
+        合并审核失败时的并发回退方法
+
+        使用已预处理的图片数据，直接并发调用 API
+
+        Args:
+            batch_images: 已预处理的图片数据 [{"base64": ..., "format": ...}, ...]
+            batch_path_list: 图片路径列表
+            brand_id: 品牌ID
+            rules_checklist: 规则清单
+            reference_images: 参考图片
+            max_concurrent: 最大并发数
+
+        Returns:
+            审核结果列表
+        """
+        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        total = len(batch_images)
+        start_time = time.time()
+        results = [None] * total
+
+        logger.info(f"并发回退审核: {total}张图片, 最大并发数={max_concurrent}")
+
+        def audit_single(args: tuple) -> tuple:
+            """审核单张图片（使用已预处理数据）"""
+            idx, image_data, path = args
+            file_path = Path(path)
+
+            try:
+                # 直接使用已预处理的数据
+                result = llm_service.audit_image(
+                    image_base64=image_data["base64"],
+                    image_format=image_data["format"],
+                    rules_checklist=rules_checklist,
+                    reference_images=reference_images,
+                )
+
+                report = self._build_report(result, rules_checklist)
+
+                return idx, {
+                    "file_name": file_path.name,
+                    "status": "success",
+                    "report": report,
+                }
+
+            except Exception as e:
+                logger.error(f"并发回退审核失败 [{file_path.name}]: {e}")
+                return idx, {
+                    "file_name": file_path.name,
+                    "status": "error",
+                    "error": str(e),
+                }
+
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = {
+                executor.submit(audit_single, (i, img, path)): i
+                for i, (img, path) in enumerate(zip(batch_images, batch_path_list))
+            }
+
+            for future in as_completed(futures):
+                idx, result = future.result()
+                results[idx] = result
+
+        total_time = time.time() - start_time
+        logger.info(f"并发回退审核完成: 耗时 {total_time:.1f}秒")
+
+        return results
+
+    def batch_audit_concurrent(
+        self,
+        image_paths: list,
+        brand_id: str | None = None,
+        max_concurrent: int = 5,
+        progress_callback=None,
+        result_callback=None,
+    ) -> list:
+        """
+        并发批量审核 - 多线程并行 API 调用
+
+        与 batch_audit_merged() 的区别：
+        - merged: 单次 API 调用处理多图，LLM 串行处理，节省 API 调用次数
+        - concurrent: 多个并行 API 调用，真正的并行处理，速度更快
+
+        Args:
+            image_paths: 图片路径列表
+            brand_id: 品牌ID
+            max_concurrent: 最大并发数（默认5）
+            progress_callback: 进度回调函数 (completed, total, message)
+            result_callback: 单条结果回调函数 (result, index, completed, total)
+
+        Returns:
+            审核结果列表，每个元素包含:
+            - file_name: 文件名
+            - status: "success" 或 "error"
+            - report: AuditReport 对象（成功时）
+            - error: 错误信息（失败时）
+        """
+        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        total = len(image_paths)
+        start_time = time.time()
+        results = [None] * total  # 预分配，保持顺序
+
+        logger.info(f"开始并发批量审核: {total}张图片, 最大并发数={max_concurrent}")
+
+        # 获取品牌规范（提前获取，避免每个线程重复获取）
+        rules_checklist = rules_context.get_rules_checklist(brand_id)
+        reference_images = rules_context.get_reference_images_data(brand_id)
+        if reference_images:
+            logger.info(f"使用 {len(reference_images)} 张参考图片")
+
+        def audit_single(args: tuple) -> tuple:
+            """审核单张图片（每个线程使用不同 Key）"""
+            idx, path = args
+            file_path = Path(path)
+
+            try:
+                # 读取图片
+                with open(file_path, "rb") as f:
+                    image_data = f.read()
+
+                # 预处理图片
+                image_base64, image_format = self.preprocess_image(
+                    image_data, file_path.suffix.lstrip(".").lower()
+                )
+
+                # 获取 API Key（多 Key 轮询）
+                from langchain_openai import ChatOpenAI
+                from langchain_core.messages import HumanMessage, SystemMessage
+
+                keys = settings.get_openai_api_keys()
+                if keys:
+                    # 轮询获取 Key
+                    key_index = idx % len(keys)
+                    api_key = keys[key_index]
+                    logger.info(f"[{file_path.name}] 使用 Key #{key_index + 1}")
+                else:
+                    api_key = settings.openai_api_key
+                    logger.warning(f"[{file_path.name}] 无多 Key 配置，使用默认 Key")
+
+                # 创建线程专属的 LLM 实例
+                thread_llm = ChatOpenAI(
+                    model=settings.doubao_model,
+                    base_url=settings.openai_api_base,
+                    api_key=api_key,
+                    temperature=0.1,
+                    timeout=180,
+                    max_tokens=16384,
+                )
+
+                # 构建审核请求
+                checklist_text = llm_service._format_checklist(rules_checklist or [])
+                reference_hint = REFERENCE_IMAGE_PROMPT if reference_images else ""
+                system_content = COMPRESSED_AUDIT_PROMPT.format(
+                    rules_checklist=checklist_text,
+                    reference_hint=reference_hint
+                )
+
+                image_url = f"data:image/{image_format};base64,{image_base64}"
+                user_content = [{"type": "text", "text": "审核这张设计稿，输出JSON格式报告。"}]
+                user_content.append({"type": "image_url", "image_url": {"url": image_url}})
+
+                messages = [
+                    SystemMessage(content=system_content),
+                    HumanMessage(content=user_content),
+                ]
+
+                # 调用 LLM
+                response = thread_llm.invoke(messages)
+                content = response.content
+
+                # 解析结果
+                result = llm_service._parse_json_response(content)
+
+                # 构建报告
+                report = self._build_report(result, rules_checklist)
+
+                return idx, {
+                    "file_name": file_path.name,
+                    "status": "success",
+                    "report": report,
+                }
+
+            except Exception as e:
+                logger.error(f"审核失败 [{file_path.name}]: {e}")
+                return idx, {
+                    "file_name": file_path.name,
+                    "status": "error",
+                    "error": str(e),
+                }
+
+        # 使用线程池并发执行
+        completed = 0
+
+        with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            # 提交所有任务
+            futures = {
+                executor.submit(audit_single, (i, p)): i
+                for i, p in enumerate(image_paths)
+            }
+
+            # 按完成顺序收集结果
+            for future in as_completed(futures):
+                idx, result = future.result()
+                results[idx] = result
+                completed += 1
+
+                # 回调通知
+                if progress_callback:
+                    progress_callback(completed, total, f"已完成 {completed}/{total}")
+
+                if result_callback:
+                    result_callback(result, idx, completed, total)
+
+        total_time = time.time() - start_time
+        avg_time = total_time / total if total > 0 else 0
+        logger.info(f"并发批量审核完成: 总耗时 {total_time:.1f}秒, 平均每张 {avg_time:.1f}秒")
+
+        return results
 
 
 # 全局审核服务实例
