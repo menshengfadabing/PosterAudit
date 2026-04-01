@@ -311,9 +311,62 @@ class AuditService:
         if reference_images:
             logger.info(f"使用 {len(reference_images)} 张参考图片")
 
-        # 计算单次请求可容纳的最大图片数
+        # 获取 API Keys 数量
+        api_keys = settings.get_openai_api_keys()
+        if not api_keys:
+            api_keys = [settings.openai_api_key] if settings.openai_api_key else []
+        key_count = len(api_keys) if api_keys else 1
+
+        # 动态计算最优批次大小
+        # 目标：最小化总审核时间
+        # 关键因素：每轮的最大批次大小（各Key并行时的最长批次）
+        # 假设每张图片处理时间约40秒
+        TIME_PER_IMAGE = 40
+
         if max_images_per_request is None:
-            max_images_per_request = llm_service.calculate_max_images(image_sizes, rules_text)
+            # 先计算 token 限制下的最大批次大小
+            token_limit = llm_service.calculate_max_images(image_sizes, rules_text)
+
+            # 批次大小范围：最小3张，最大不超过token限制且不超过5张
+            min_batch = 3
+            max_batch = min(token_limit, 5)
+
+            best_batch_size = min_batch
+            best_time = float('inf')
+
+            for batch_size in range(min_batch, max_batch + 1):
+                # 计算各批次的大小
+                batch_sizes = []
+                remaining = total
+                while remaining > 0:
+                    batch_sizes.append(min(batch_size, remaining))
+                    remaining -= batch_size
+
+                batch_count = len(batch_sizes)
+
+                # 计算每轮的时间（Key并行，每轮取最大批次）
+                rounds = (batch_count + key_count - 1) // key_count  # ceil(batch_count/key_count)
+                total_time = 0
+
+                for r in range(rounds):
+                    # 这一轮处理的批次索引范围
+                    start_idx = r * key_count
+                    end_idx = min(start_idx + key_count, batch_count)
+                    # 这一轮各批次的大小
+                    round_batch_sizes = batch_sizes[start_idx:end_idx]
+                    # 这一轮的时间取决于最大的批次
+                    max_batch_in_round = max(round_batch_sizes)
+                    round_time = max_batch_in_round * TIME_PER_IMAGE
+                    total_time += round_time
+
+                logger.debug(f"批次大小 {batch_size}: 批次分布={batch_sizes}, 轮数={rounds}, 总时间={total_time}s")
+
+                if total_time < best_time:
+                    best_time = total_time
+                    best_batch_size = batch_size
+
+            max_images_per_request = best_batch_size
+            logger.info(f"动态计算批次大小: {max_images_per_request}张/批 (Key数={key_count}, 总图片={total}, 预估时间={best_time}s)")
 
         # 分批处理
         results = []
@@ -324,11 +377,6 @@ class AuditService:
 
         # 计算每张图片在总列表中的索引
         path_to_index = {path: i for i, path in enumerate(image_paths)}
-
-        # 获取 API Keys
-        api_keys = settings.get_openai_api_keys()
-        if not api_keys:
-            api_keys = [settings.openai_api_key] if settings.openai_api_key else []
 
         def process_batch(args: tuple) -> tuple:
             """处理单个批次"""
