@@ -109,6 +109,27 @@ class AuditPage(ScrollArea):
         compression_layout.addWidget(self.compression_combo, 1)
         left_layout.addLayout(compression_layout)
 
+        # 批次大小选择
+        batch_size_layout = QHBoxLayout()
+        batch_size_label = BodyLabel("每批合并:")
+        self.batch_size_combo = ComboBox()
+        self.batch_size_combo.addItems([
+            "自动计算",
+            "3 张/批（推荐）",
+            "4 张/批",
+            "5 张/批（最大）"
+        ])
+        self.batch_size_combo.setToolTip(
+            "单次API调用合并的图片数量\n"
+            "自动：根据Token动态计算\n"
+            "推荐：输出稳定，不易截断\n"
+            "最大：可能因规则较多导致输出截断"
+        )
+        self.batch_size_combo.setCurrentIndex(1)  # 默认推荐3张/批
+        batch_size_layout.addWidget(batch_size_label)
+        batch_size_layout.addWidget(self.batch_size_combo, 1)
+        left_layout.addLayout(batch_size_layout)
+
         # 图片选择 - 支持多选
         image_label = StrongBodyLabel("设计稿图片")
         left_layout.addWidget(image_label)
@@ -204,12 +225,16 @@ class AuditPage(ScrollArea):
         compression_preset = ["balanced", "high_quality", "high_compression", "no_compression"][self.compression_combo.currentIndex()]
         audit_service.set_compression_preset(compression_preset)
 
+        # 获取批次大小预设（None表示自动计算）
+        batch_size_values = [None, 3, 4, 5]
+        batch_size = batch_size_values[self.batch_size_combo.currentIndex()]
+
         if len(image_paths) == 1:
             # 单图审核
             self._start_single_audit(image_paths[0], brand_id, compression_preset)
         else:
             # 批量审核
-            self._start_batch_audit(image_paths, brand_id, compression_preset)
+            self._start_batch_audit(image_paths, brand_id, compression_preset, batch_size)
 
     def _start_single_audit(self, image_path: str, brand_id: str, compression_preset: str):
         """开始单图审核"""
@@ -235,9 +260,9 @@ class AuditPage(ScrollArea):
         self.worker.progress_signal.connect(lambda p, m: self.progress_updated.emit(-1, m, m))
         self.worker.start()
 
-    def _start_batch_audit(self, image_paths: list, brand_id: str, compression_preset: str):
+    def _start_batch_audit(self, image_paths: list, brand_id: str, compression_preset: str, batch_size: int = None):
         """开始批量审核"""
-        logger.info(f"批量审核使用压缩预设: {compression_preset}")
+        logger.info(f"批量审核使用压缩预设: {compression_preset}, 批次大小: {batch_size or '自动'}")
 
         # 发送任务开始信号
         self.task_started.emit("批量审核")
@@ -261,7 +286,7 @@ class AuditPage(ScrollArea):
         self.streaming_result.connect(self._on_streaming_result)
 
         # 后台任务
-        self._batch_worker = Worker(self._run_batch_audit, image_paths, brand_id)
+        self._batch_worker = Worker(self._run_batch_audit, image_paths, brand_id, batch_size)
         self._batch_worker.finished_signal.connect(self._on_batch_finished)
         self._batch_worker.error_signal.connect(self._on_audit_error)
         self._batch_worker.progress_signal.connect(self._on_batch_progress)
@@ -343,11 +368,11 @@ class AuditPage(ScrollArea):
             logger.error(f"流式审核失败: {e}")
             raise
 
-    def _run_batch_audit(self, image_paths: list, brand_id: str, progress_callback=None):
+    def _run_batch_audit(self, image_paths: list, brand_id: str, batch_size: int = None, progress_callback=None):
         """执行批量审核 - 使用合并请求，流式输出JSON"""
         import time
 
-        logger.info(f"开始批量审核，共 {len(image_paths)} 张图片, brand_id={brand_id}")
+        logger.info(f"开始批量审核，共 {len(image_paths)} 张图片, brand_id={brand_id}, 批次大小={batch_size or '自动'}")
 
         # 获取参考图片
         reference_images = rules_context.get_reference_images_data(brand_id)
@@ -426,7 +451,7 @@ class AuditPage(ScrollArea):
         audit_service.batch_audit_merged(
             image_paths=image_paths,
             brand_id=brand_id,
-            max_images_per_request=None,
+            max_images_per_request=batch_size,  # 用户指定的批次大小，None则自动计算
             progress_callback=progress_cb,
             stream_callback=stream_cb,
             result_callback=result_cb,

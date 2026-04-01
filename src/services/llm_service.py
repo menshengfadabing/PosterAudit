@@ -8,22 +8,23 @@ from typing import Any, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.utils.config import settings
+from src.utils.json_parser import parse_json_response, parse_json_array
 
 logger = logging.getLogger(__name__)
 
 
-# 审核Prompt - 单图审核
-COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品牌规范规则清单，逐条审核设计稿的合规性。
+# 审核Prompt - 单图审核（精简输出）
+COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据规则清单审核设计稿。
 
-【品牌规范规则清单】
+【规则清单 - 共{rule_count}条】
 {rules_checklist}
 {reference_hint}
-【输出格式】JSON:
+【输出要求】只输出JSON:
 {{
   "score": 0-100,
   "status": "pass|warning|fail",
-  "rule_checks": [
-    {{"rule_id": "Rule_N", "status": "pass|fail|review", "confidence": 0.0-1.0, "detail": "判断依据和说明"}}
+  "results": [
+    {{"id": "Rule_N", "s": "p|f|r", "c": 0.0-1.0}}
   ],
   "detection": {{
     "colors": [{{"hex": "#XXX", "name": "名称", "percent": 比例}}],
@@ -31,15 +32,13 @@ COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品
     "texts": ["识别的文字"],
     "fonts": [{{"text": "文字", "font_family": "字体", "is_forbidden": bool}}]
   }},
-  "issues": [{{"type": "color|logo|font|layout|style", "severity": "critical|major|minor", "description": "问题描述", "suggestion": "修改建议"}}],
+  "issues": [{{"type": "类型", "severity": "严重程度", "description": "问题", "suggestion": "建议"}}],
   "summary": "总体评价"
 }}
 
-重要提示：
-1. rule_checks 数组必须包含每条规则的检查结果，rule_id 必须与清单中的一致
-2. status: pass=合规, fail=不合规, review=需人工复核
-3. confidence: 对判断的置信度，0-1之间
-4. detail: 简要说明判断依据'''
+字段说明:
+- results: 规则结果数组，id=规则ID，s=状态(p=pass/f=fail/r=review)，c=置信度
+- 必须为每条规则输出结果'''
 
 # 参考图片提示模板
 REFERENCE_IMAGE_PROMPT = '''
@@ -48,40 +47,38 @@ REFERENCE_IMAGE_PROMPT = '''
 1. 将待审核图片中的Logo与参考图片进行视觉对比
 2. 检查Logo的形状、比例、颜色是否与标准一致
 3. 判断Logo是否存在变形、拉伸或颜色错误
-4. 如发现差异，请在检查结果中详细说明
 '''
 
-# 批量审核Prompt - 多图合并
-BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据以下品牌规范规则清单，逐条审核多张设计稿的合规性。
+# 批量审核Prompt - 多图合并（精简输出）
+BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据规则清单审核多张设计稿。
 {reference_hint}
-【品牌规范规则清单】
+【规则清单 - 共{rule_count}条】
 {rules_checklist}
 
-【输出格式】JSON数组，每张图片一个对象:
+【输出格式】JSON数组:
 [
   {{
-    "image_index": 0,
+    "idx": 0,
     "score": 0-100,
     "status": "pass|warning|fail",
-    "rule_checks": [
-      {{"rule_id": "Rule_N", "status": "pass|fail|review", "confidence": 0.0-1.0, "detail": "判断依据"}}
+    "results": [
+      {{"id": "Rule_N", "s": "p|f|r", "c": 0.0-1.0}}
     ],
     "detection": {{
       "colors": [{{"hex": "#XXX", "name": "名称", "percent": 比例}}],
-      "logo": {{"found": bool, "position": "位置", "size_percent": 数值, "position_correct": bool, "deformed": bool}},
+      "logo": {{"found": bool, "position": "位置", "size_percent": 数值}},
       "texts": ["识别的文字"],
       "fonts": [{{"text": "文字", "font_family": "字体", "is_forbidden": bool}}]
     }},
-    "issues": [{{"type": "color|logo|font|layout|style", "severity": "critical|major|minor", "description": "问题描述", "suggestion": "修改建议"}}],
-    "summary": "总体评价"
-  }},
-  ... (每张图片一个对象)
+    "issues": [{{"type": "类型", "severity": "严重程度", "description": "问题", "suggestion": "建议"}}],
+    "summary": "评价"
+  }}
 ]
 
-重要：
-1. 输出必须是JSON数组，数组长度与图片数量一致，image_index从0开始
-2. rule_checks 数组必须包含每条规则的检查结果
-3. status: pass=合规, fail=不合规, review=需人工复核'''
+重要:
+1. idx: 图片序号(从0开始)
+2. results: 每条规则结果，id=规则ID，s=状态(p/f/r)，c=置信度
+3. 必须为每张图片的每条规则输出结果'''
 
 
 class LLMService:
@@ -104,30 +101,57 @@ class LLMService:
     IMAGE_TOKEN_PER_TILE = 170  # 每个512x512 tile的token
 
     # 批量审核输出估算
-    OUTPUT_TOKENS_PER_IMAGE = 2000  # 每张图片输出约2000 tokens（非常保守的估计）
+    OUTPUT_TOKENS_PER_IMAGE = 500  # 每张图片输出约500 tokens（简化格式后）
     OUTPUT_OVERHEAD = 200  # 输出固定开销
 
     def __init__(self) -> None:
         self._llm = None
         self._context_limit = None
         self._output_limit = None
+        self._key_index = 0  # Key 轮询索引
+        self._api_keys = []  # 缓存的 Key 列表
+
+    def _get_next_api_key(self) -> str:
+        """轮询获取下一个 API Key"""
+        # 获取 Key 列表（首次或配置变更时刷新）
+        keys = settings.get_openai_api_keys()
+        if keys != self._api_keys:
+            self._api_keys = keys
+            self._key_index = 0
+            logger.info(f"API Key 列表已更新，共 {len(keys)} 个")
+
+        if not self._api_keys:
+            logger.warning("未配置 API Key")
+            return ""
+
+        # 轮询选择
+        key = self._api_keys[self._key_index % len(self._api_keys)]
+        self._key_index += 1
+        logger.debug(f"使用 API Key #{(self._key_index - 1) % len(self._api_keys) + 1}")
+        return key
 
     @property
     def llm(self):
-        """获取LLM实例（懒加载）"""
+        """获取LLM实例（懒加载，使用轮询 Key）"""
         if self._llm is None:
             from langchain_openai import ChatOpenAI
             # 火山引擎模型支持更大的输出
             # 默认 max_tokens=4096，需要显式设置更大值
+            api_key = self._get_next_api_key()
             self._llm = ChatOpenAI(
                 model=settings.doubao_model,
                 base_url=settings.openai_api_base,
-                api_key=settings.openai_api_key,
+                api_key=api_key,
                 temperature=0.1,
                 timeout=180,
                 max_tokens=16384,  # 16k 输出限制
             )
         return self._llm
+
+    def reset_llm(self):
+        """重置 LLM 实例（强制使用下一个 Key）"""
+        self._llm = None
+        self._key_index += 1  # 切换到下一个 Key
 
     @property
     def context_limit(self) -> int:
@@ -209,8 +233,10 @@ class LLMService:
         # === 3. 取较小值 ===
         max_images = min(max_by_input, max_by_output)
 
-        # 安全上限（保守设置，避免输出token超限）
-        max_images = min(max_images, 2)
+        # 安全上限（避免单次请求处理过多图片导致超时）
+        # 之前硬编码为2，现在提高到10，让动态计算真正发挥作用
+        MAX_IMAGES_PER_REQUEST = 10
+        max_images = min(max_images, MAX_IMAGES_PER_REQUEST)
 
         logger.info(
             f"动态计算: 输入限制={max_by_input}张, 输出限制={max_by_output}张, "
@@ -219,17 +245,35 @@ class LLMService:
 
         return max(max_images, 1)
 
-    def set_api_config(self, api_key: str, api_base: str = None, model: str = None) -> None:
-        """设置API配置"""
-        settings.openai_api_key = api_key
+    def set_api_config(self, api_key: str = None, api_keys: list[str] = None, api_base: str = None, model: str = None) -> None:
+        """
+        设置API配置
+
+        Args:
+            api_key: 单个 API Key（兼容旧接口）
+            api_keys: 多个 API Key 列表（新接口）
+            api_base: API 基础 URL
+            model: 模型名称
+        """
+        # 支持多 Key 设置
+        if api_keys:
+            settings.openai_api_keys = ",".join(api_keys)
+        elif api_key:
+            settings.openai_api_key = api_key
+            settings.openai_api_keys = ""  # 清空多 Key 配置
+
         if api_base:
             settings.openai_api_base = api_base
         if model:
             settings.doubao_model = model
-        self._llm = None  # 重置LLM实例
-        self._context_limit = None  # 重置上下文限制
-        self._output_limit = None  # 重置输出限制
-        logger.info("API配置已更新")
+
+        # 重置所有缓存
+        self._llm = None
+        self._context_limit = None
+        self._output_limit = None
+        self._api_keys = []
+        self._key_index = 0
+        logger.info(f"API配置已更新，Key数量: {len(settings.get_openai_api_keys())}")
 
     def audit_image(
         self,
@@ -238,6 +282,7 @@ class LLMService:
         rules_checklist: list[dict] = None,
         reference_images: list[dict] = None,
         progress_callback=None,
+        api_key: str = None,
     ) -> dict[str, Any]:
         """
         审核单张图片
@@ -248,11 +293,33 @@ class LLMService:
             rules_checklist: 规则检查清单
             reference_images: 参考图片列表 [{"url": data_url, "format": str, "description": str}]
             progress_callback: 进度回调（未使用）
+            api_key: 指定的 API Key（用于重试）
 
         Returns:
             审核结果字典
         """
         try:
+            # 如果指定了 api_key，创建临时 LLM 实例
+            llm_instance = None
+            if api_key:
+                from langchain_openai import ChatOpenAI
+                llm_instance = ChatOpenAI(
+                    model=settings.doubao_model,
+                    base_url=settings.openai_api_base,
+                    api_key=api_key,
+                    temperature=0.1,
+                    timeout=180,
+                    max_tokens=16384,
+                )
+            else:
+                # 多 Key 轮询：每次调用都获取新 Key
+                keys = settings.get_openai_api_keys()
+                if len(keys) > 1:
+                    # 多 Key 模式，强制切换 Key
+                    self._llm = None  # 清除缓存
+                    logger.info(f"多 Key 模式: 切换到下一个 Key")
+                llm_instance = self.llm
+
             # 格式化规则清单为文本
             checklist_text = self._format_checklist(rules_checklist or [])
 
@@ -262,7 +329,8 @@ class LLMService:
             # 构建Prompt
             system_content = COMPRESSED_AUDIT_PROMPT.format(
                 rules_checklist=checklist_text,
-                reference_hint=reference_hint
+                reference_hint=reference_hint,
+                rule_count=len(rules_checklist or [])
             )
             image_url = f"data:image/{image_format};base64,{image_base64}"
 
@@ -294,7 +362,7 @@ class LLMService:
 
             # 调用LLM
             logger.info(f"正在调用API进行审核... (参考图片: {len(reference_images or [])}张)")
-            response = self.llm.invoke(messages)
+            response = llm_instance.invoke(messages)
             content = response.content
 
             # 解析结果
@@ -344,7 +412,8 @@ class LLMService:
             # 构建Prompt
             system_content = COMPRESSED_AUDIT_PROMPT.format(
                 rules_checklist=checklist_text,
-                reference_hint=reference_hint
+                reference_hint=reference_hint,
+                rule_count=len(rules_checklist or [])
             )
             image_url = f"data:image/{image_format};base64,{image_base64}"
 
@@ -468,7 +537,8 @@ class LLMService:
             # 构建Prompt
             system_content = BATCH_AUDIT_PROMPT.format(
                 rules_checklist=checklist_text,
-                reference_hint=reference_hint
+                reference_hint=reference_hint,
+                rule_count=len(rules_checklist or [])
             )
 
             # 构建用户消息
@@ -531,6 +601,7 @@ class LLMService:
         rules_checklist: list[dict] = None,
         reference_images: list[dict] = None,
         stream_callback=None,
+        api_key: str = None,
     ) -> list[dict[str, Any]]:
         """
         流式批量审核多张图片（单次API调用，流式输出JSON）
@@ -540,6 +611,7 @@ class LLMService:
             rules_checklist: 规则检查清单
             reference_images: 参考图片列表 [{"url": data_url, "format": str, "description": str}]
             stream_callback: 流式回调函数，接收每个文本块
+            api_key: 指定的 API Key（用于多批次并行）
 
         Returns:
             审核结果列表
@@ -547,6 +619,21 @@ class LLMService:
         try:
             if not images:
                 return []
+
+            # 如果指定了 api_key，创建临时 LLM 实例
+            llm_instance = None
+            if api_key:
+                from langchain_openai import ChatOpenAI
+                llm_instance = ChatOpenAI(
+                    model=settings.doubao_model,
+                    base_url=settings.openai_api_base,
+                    api_key=api_key,
+                    temperature=0.1,
+                    timeout=300,
+                    max_tokens=16384,
+                )
+            else:
+                llm_instance = self.llm
 
             if len(images) == 1:
                 # 单张图片，使用单图流式接口
@@ -573,7 +660,8 @@ class LLMService:
             # 构建Prompt
             system_content = BATCH_AUDIT_PROMPT.format(
                 rules_checklist=checklist_text,
-                reference_hint=reference_hint
+                reference_hint=reference_hint,
+                rule_count=len(rules_checklist or [])
             )
 
             # 构建用户消息
@@ -617,7 +705,7 @@ class LLMService:
             logger.info(f"正在调用API进行流式批量审核... (参考图片: {len(reference_images or [])}张)")
             full_content = ""
 
-            for chunk in self.llm.stream(messages):
+            for chunk in llm_instance.stream(messages):
                 if chunk.content:
                     text_chunk = chunk.content
                     full_content += text_chunk
@@ -684,29 +772,9 @@ class LLMService:
         return results[:expected_count]
 
     def _parse_json_response(self, content: str) -> Optional[dict]:
-        """解析LLM响应中的JSON"""
-        import re
-
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
-
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        brace_match = re.search(r"\{[\s\S]*\}", content)
-        if brace_match:
-            try:
-                return json.loads(brace_match.group())
-            except json.JSONDecodeError:
-                pass
-
-        return None
+        """解析LLM响应中的JSON（委托给公共方法）"""
+        result = parse_json_response(content)
+        return result if isinstance(result, dict) else None
 
     def _build_error_result(self, error_msg: str) -> dict:
         """构建错误结果"""
@@ -734,14 +802,18 @@ class LLMService:
         }
 
     def _normalize_result(self, result: dict) -> dict:
-        """标准化结果"""
+        """标准化结果（支持精简格式）"""
         result.setdefault("score", 50)
         result.setdefault("status", "warning")
         result.setdefault("summary", "审核完成")
         result.setdefault("detection", {})
-        result.setdefault("checks", {})
-        result.setdefault("rule_checks", [])
         result.setdefault("issues", [])
+
+        # 支持精简格式 results 和旧格式 rule_checks
+        if "results" not in result and "rule_checks" not in result:
+            result["results"] = []
+        if "results" in result:
+            result.setdefault("rule_checks", result["results"])
 
         detection = result["detection"]
         detection.setdefault("colors", [])
