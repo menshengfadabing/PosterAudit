@@ -358,14 +358,16 @@ class AuditService:
                 batch_time = time.time() - batch_start
                 logger.info(f"批次 {batch_num} 完成，耗时: {batch_time:.1f}秒")
 
-                # 检查是否有有效结果
-                has_valid_result = any(
-                    r.get("score", 0) > 0 or r.get("status") != "fail"
-                    for r in batch_results
-                )
+                # 检查是否有有效结果（有规则检查结果即为有效，与状态无关）
+                def has_valid_rules(result):
+                    """检查结果是否包含规则检查结果"""
+                    rule_checks = result.get("results", []) or result.get("rule_checks", [])
+                    return len(rule_checks) > 0
+
+                has_valid_result = any(has_valid_rules(r) for r in batch_results)
 
                 if not has_valid_result and len(batch_images) > 1:
-                    logger.warning(f"批次 {batch_num} 合并请求失败，回退到并发审核")
+                    logger.warning(f"批次 {batch_num} 合并请求无有效结果，回退到并发审核")
                     # 回退处理
                     fallback_results = self._fallback_concurrent(
                         batch_images=batch_images,
