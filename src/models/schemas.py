@@ -90,14 +90,6 @@ class DetectionResult(BaseModel):
     style: dict[str, StyleScore] = Field(default_factory=dict, description="风格评分")
 
 
-class CheckItem(BaseModel):
-    """检查项"""
-    code: str = Field(..., description="检查项代码")
-    name: str = Field(..., description="检查项名称")
-    status: str = Field(default="pass", description="状态: pass/warn/fail")
-    detail: str = Field(default="", description="详细说明")
-
-
 class RuleCheckItem(BaseModel):
     """规则检查项 - 用于规则检查清单"""
     rule_id: str = Field(..., description="规则ID: Rule_1, Rule_2...")
@@ -123,7 +115,6 @@ class AuditReport(BaseModel):
     score: int = Field(..., ge=0, le=100, description="合规分数 0-100")
     status: AuditStatus = Field(..., description="审核状态")
     detection: DetectionResult = Field(default_factory=DetectionResult, description="检测结果")
-    checks: dict[str, list[CheckItem]] = Field(default_factory=dict, description="各项检查结果")
     rule_checks: list[RuleCheckItem] = Field(default_factory=list, description="规则检查清单")
     issues: list[Issue] = Field(default_factory=list, description="问题列表")
     summary: str = Field(default="", description="总体评价")
@@ -202,14 +193,6 @@ class SecondaryRule(BaseModel):
     priority: int = Field(default=1, description="优先级: 1=重要, 2=一般, 3=参考")
 
 
-class SourceFile(BaseModel):
-    """规范组源文件"""
-    filename: str = Field(..., description="文件名")
-    file_size: int = Field(default=0, description="文件大小(字节)")
-    upload_time: Optional[datetime] = Field(default=None, description="上传时间")
-    status: str = Field(default="pending", description="状态: pending, parsed, merged")
-
-
 class ReferenceImage(BaseModel):
     """标准参考图片（Logo等）"""
     filename: str = Field(..., description="文件名")
@@ -217,16 +200,6 @@ class ReferenceImage(BaseModel):
     image_type: str = Field(default="logo", description="图片类型：logo/logo_variant/icon等")
     file_size: int = Field(default=0, description="文件大小(字节)")
     upload_time: Optional[datetime] = Field(default=None, description="上传时间")
-
-
-class RuleGroup(BaseModel):
-    """规范组"""
-    group_id: str = Field(default="", description="规范组ID")
-    brand_name: str = Field(default="", description="品牌名称")
-    description: Optional[str] = Field(default=None, description="描述")
-    source_files: list[SourceFile] = Field(default_factory=list, description="源文件列表")
-    created_at: Optional[datetime] = Field(default=None, description="创建时间")
-    updated_at: Optional[datetime] = Field(default=None, description="更新时间")
 
 
 class BrandRules(BaseModel):

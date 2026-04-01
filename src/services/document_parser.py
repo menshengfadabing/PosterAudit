@@ -21,6 +21,7 @@ from src.models.schemas import (
     SecondaryRule,
 )
 from src.utils.config import settings
+from src.utils.json_parser import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -712,31 +713,9 @@ class DocumentParser:
         return rules
 
     def _parse_json_response(self, content: str) -> dict | None:
-        """从LLM响应中解析JSON"""
-        # 方法1: 尝试直接解析
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
-
-        # 方法2: 提取```json ... ```块
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # 方法3: 找到第一个 { 和最后一个 }
-        first_brace = content.find("{")
-        last_brace = content.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            try:
-                return json.loads(content[first_brace:last_brace + 1])
-            except json.JSONDecodeError:
-                pass
-
-        return None
+        """从LLM响应中解析JSON（委托给公共方法）"""
+        result = parse_json_response(content)
+        return result if isinstance(result, dict) else None
 
     def _parse_color_rules(self, rules: BrandRules, color_data: dict):
         """解析色彩规则"""

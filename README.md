@@ -21,19 +21,20 @@
 ### 3. 设计稿智能审核
 - **单图审核**: 上传单张设计稿，获取详细合规报告
 - **批量审核**: 支持最多 100 张图片批量审核
-  - **并发模式**: 多个独立 API 请求并行处理，速度快
-  - **合并模式**: 单次 API 调用处理多图，节省 Token
+  - **合并+并行策略**: 单次 API 调用处理多图 + ThreadPoolExecutor 并行处理多个批次
+  - **多 Key 并发**: 支持配置多个 API Key，轮询分配避免限流
+  - **批次大小可选**: 自动计算/3张/5张/8张/10张，灵活控制合并数量
 - **实时流式输出**: 审核过程中实时显示 AI 分析结果
 - **图片智能压缩**: 四种压缩预设（均衡/高质量/高压缩/不压缩），自动优化传输
+- **精简输出格式**: 简化 LLM 输出结构，节省约 70% Token 消耗
 
 ### 4. 规则检查清单
 - **逐条审核**: 将品牌规范转换为规则清单，逐条检查合规性
-- **状态标识**: 每条规则标注结果（PASS/REVIEW/FAIL）和置信度
-  - **PASS**: 合规，置信度通常 0.8-1.0
-  - **FAIL**: 不合规，需修改
-  - **REVIEW**: 需人工复核，置信度可能较低（软规则或需语境判断）
-- **优先级排序**: 问题规则优先显示，便于快速定位
-- **置信度说明**: 置信度表示 LLM 对判断的确定性（0-1），高风险标签等软规则默认进入人工复核
+- **状态判定**: 根据规则状态判定最终评价（FAIL > REVIEW > PASS）
+  - 有任何 FAIL → 最终评价为 **不合规**
+  - 全部 PASS → 最终评价为 **合规**
+  - 有 REVIEW 但无 FAIL → 最终评价为 **需复核**
+- **优先级排序**: 问题优先显示（FAIL红色 → REVIEW黄色 → PASS绿色）
 
 ### 5. 报告生成与历史
 - **多格式导出**: JSON、Markdown 格式报告
@@ -83,7 +84,9 @@ src/services/
 ├── llm_service.py      # LLM 调用服务
 │   ├── audit_image()          # 单图审核
 │   ├── audit_image_stream()   # 流式审核
-│   └── audit_images_batch()   # 批量审核
+│   ├── audit_images_batch_stream()  # 批量审核（支持指定 API Key）
+│   ├── calculate_max_images() # 动态计算批次大小
+│   └── _get_next_api_key()    # API Key 轮询
 │
 ├── document_parser.py  # 文档解析服务
 │   ├── parse()                # 解析文档
@@ -93,8 +96,8 @@ src/services/
 ├── audit_service.py    # 审核编排服务
 │   ├── audit()                # 执行审核
 │   ├── preprocess_image()     # 图片预处理
-│   ├── batch_audit_concurrent()  # 并发批量
-│   └── batch_audit_merged()   # 合并批量
+│   ├── batch_audit_merged()   # 合并+并行批量审核（推荐）
+│   └── _fallback_concurrent() # 合并失败时的并发回退
 │
 └── rules_context.py    # 规范上下文管理
     ├── get_rules()            # 获取规范
@@ -123,6 +126,30 @@ result = llm_service.parse_stream_result(full_content)
 1. 使用 LangChain 的 `stream()` 方法获取 LLM 输出流
 2. 通过 `QMetaObject.invokeMethod` 跨线程更新 Qt UI
 3. 使用 `@Slot` 装饰器注册 Qt 槽函数
+
+### 批量审核性能优化
+
+采用 **合并+并行** 双策略协同：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     批量审核流程                              │
+├─────────────────────────────────────────────────────────────┤
+│  9张图片 → 分3批次（每批3张）→ ThreadPoolExecutor 并行处理    │
+│                                                              │
+│  批次1 ──→ API Key #1 ──→ 单次调用处理3张                    │
+│  批次2 ──→ API Key #2 ──→ 单次调用处理3张  } 并发执行         │
+│  批次3 ──→ API Key #3 ──→ 单次调用处理3张                    │
+│                                                              │
+│  耗时: ~146秒 (16.3秒/张) vs 串行 ~540秒 (60秒/张)           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+优化点：
+- **精简输出格式**: 规则结果用 `s/c` 替代 `status/confidence`，节省 ~70% Token
+- **动态批次计算**: 根据模型上下文窗口自动计算最优合并数量
+- **不完整结果重试**: 检测输出截断，自动单独重审
+- **失败自动回退**: 合并请求失败时切换为并发单图审核
 
 ### 数据模型
 
@@ -180,8 +207,10 @@ uv sync
 创建 `.env` 文件：
 
 ```env
-# 多模态模型（图像审核）
-OPENAI_API_KEY=your_api_key
+# 多模态模型（图像审核）- 支持多 Key 配置
+OPENAI_API_KEY_0=your_api_key_1
+OPENAI_API_KEY_1=your_api_key_2
+OPENAI_API_KEY_2=your_api_key_3
 OPENAI_API_BASE=https://ark.cn-beijing.volces.com/api/v3
 DOUBAO_MODEL=doubao-seed-2-0-pro-260215
 
@@ -193,6 +222,8 @@ DEEPSEEK_MODEL=deepseek-v3-2-251201
 # 可选：代理配置
 HTTPS_PROXY=socks5://127.0.0.1:1080
 ```
+
+> **多 API Key 说明**: 配置多个 Key 后，批量审核时各批次轮询使用不同 Key，避免 API 限流。GUI 设置页面支持动态添加/测试/删除 Key。
 
 ### 4. 运行程序
 
@@ -232,10 +263,10 @@ check_2/
 ├── gui/                        # UI 层
 │   ├── main_window.py          # 主窗口（FluentWindow）
 │   ├── pages/
-│   │   ├── audit_page.py       # 审核页面（流式显示）
+│   │   ├── audit_page.py       # 审核页面（流式显示、批次大小选择）
 │   │   ├── rules_page.py       # 规范管理页面
 │   │   ├── history_page.py     # 历史记录页面
-│   │   └── settings_page.py    # 设置页面
+│   │   └── settings_page.py    # 设置页面（多 API Key 配置）
 │   ├── widgets/
 │   │   ├── image_drop_area.py  # 图片拖拽组件
 │   │   ├── progress_panel.py   # 进度面板
@@ -296,6 +327,14 @@ sudo apt install fonts-noto-cjk
 
 ### Q: 如何添加新的规范规则？
 上传包含新规则的文档，系统会自动提取。次要规则支持动态分类（排版、文案、风格等）。
+
+### Q: 批量审核速度慢？
+1. 配置多个 API Key（推荐 3-5 个），实现并发调用
+2. 调整"每批合并"选项，选择更大的批次（如 8 张/批）
+3. 使用"均衡"或"高压缩"预设减少图片传输时间
+
+### Q: API 限流怎么办？
+配置多个 API Key，系统会轮询分配。GUI 设置页面可动态添加/测试 Key。
 
 ## License
 
