@@ -289,9 +289,6 @@ class HistoryPage(ScrollArea):
             'html, body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; height: auto; }',
             'body { display: block; box-sizing: border-box; }',
             '.header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #dee2e6; width: 100%; box-sizing: border-box; }',
-            '.score-box { margin-right: 20px; }',
-            '.score-value { font-size: 24px; font-weight: bold; color: #333; }',
-            '.score-label { font-size: 12px; color: #666; }',
             '.status-badge { padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; }',
             '.summary-box { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 12px; width: 100%; box-sizing: border-box; }',
             '.summary-title { font-weight: bold; margin-bottom: 6px; color: #333; }',
@@ -313,7 +310,6 @@ class HistoryPage(ScrollArea):
         ]
 
         html_parts.append('<div class="header">')
-        html_parts.append(f'<div class="score-box"><div class="score-value">{score}</div><div class="score-label">分数</div></div>')
         html_parts.append(f'<span class="status-badge" style="background:{status_bg};color:{status_color};">{status_label}</span>')
         html_parts.append('</div>')
 
@@ -368,7 +364,7 @@ class HistoryPage(ScrollArea):
         html_content = ''.join(html_parts)
 
         # 生成纯文本版本用于复制
-        text_lines = [f"【审核结果】 分数: {score} | 状态: {status_label}"]
+        text_lines = [f"【审核结果】 状态: {status_label}"]
         if summary:
             text_lines.extend(["", "【总体评价】", f"  {summary}"])
         if rule_checks:
@@ -472,7 +468,7 @@ class HistoryPage(ScrollArea):
         # 详细结果表格
         html_parts.append('<div class="summary-title">详细结果</div>')
         html_parts.append('<table>')
-        html_parts.append('<tr><th>#</th><th>文件名</th><th>状态</th><th>分数</th><th>FAIL/REVIEW规则</th></tr>')
+        html_parts.append('<tr><th>#</th><th>文件名</th><th>状态</th><th>FAIL/REVIEW规则</th></tr>')
 
         for i, r in enumerate(results, 1):
             status = r.get("status", "error")
@@ -482,7 +478,6 @@ class HistoryPage(ScrollArea):
             file_name = r.get("file_name", "-")
 
             report = r.get("report", {})
-            score = report.get("score", 0) if report else 0
 
             rule_checks = report.get("rule_checks", []) if report else []
             fail_count_item = len([c for c in rule_checks if c.get("status") == "fail"])
@@ -501,7 +496,6 @@ class HistoryPage(ScrollArea):
             html_parts.append(f'<td>{i}</td>')
             html_parts.append(f'<td class="file-name">{file_name}</td>')
             html_parts.append(f'<td><span class="status-badge {status_class}">{status_label}</span></td>')
-            html_parts.append(f'<td class="score">{score}</td>')
             html_parts.append(f'<td>{" | ".join(summary_parts)}</td>')
             html_parts.append('</tr>')
 
@@ -523,10 +517,9 @@ class HistoryPage(ScrollArea):
             status_label = status_labels.get(status, "REVIEW")
             file_name = r.get("file_name", "-")
             report = r.get("report", {})
-            score = report.get("score", 0) if report else 0
 
             text_lines.append(f"--- 图片 {i}: {file_name} ---")
-            text_lines.append(f"状态: {status_label} | 分数: {score}")
+            text_lines.append(f"状态: {status_label}")
 
             rule_checks = report.get("rule_checks", []) if report else []
             fail_rules = [c for c in rule_checks if c.get("status") == "fail"]

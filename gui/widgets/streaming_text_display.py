@@ -665,9 +665,6 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             html_parts.append(f'<span class="image-status {status_class}">{status_label}</span>')
 
             report = result.get("report", {})
-            if report:
-                score = report.get("score", 0)
-                html_parts.append(f'<span class="image-score">分数: {score}</span>')
             html_parts.append('</div>')
 
             if result.get("status") == "error":
@@ -767,39 +764,36 @@ class StreamingAuditDisplay(StreamingTextDisplay):
                 continue
 
             report = result.get("report", {})
-            if report:
-                score = report.get("score", 0)
-                lines.append(f"分数: {score}")
 
-                rule_checks = report.get("rule_checks", [])
-                if rule_checks:
-                    # 状态规范化函数：只保留 pass/review/fail 三种状态
-                    def normalize_status(s):
-                        if not s:
-                            return "review"
-                        s = s.lower()
-                        return s if s in ("pass", "fail", "review") else "review"
+            rule_checks = report.get("rule_checks", [])
+            if rule_checks:
+                # 状态规范化函数：只保留 pass/review/fail 三种状态
+                def normalize_status(s):
+                    if not s:
+                        return "review"
+                    s = s.lower()
+                    return s if s in ("pass", "fail", "review") else "review"
 
-                    status_order = {"fail": 0, "review": 1, "pass": 2}
-                    def get_sort_key(x):
-                        rule_id = x.get("rule_id", "Rule_999")
-                        rule_num = int(rule_id.replace("Rule_", "") or 999)
-                        normalized = normalize_status(x.get("status"))
-                        return (status_order.get(normalized, 1), rule_num)
-                    sorted_checks = sorted(rule_checks, key=get_sort_key)
+                status_order = {"fail": 0, "review": 1, "pass": 2}
+                def get_sort_key(x):
+                    rule_id = x.get("rule_id", "Rule_999")
+                    rule_num = int(rule_id.replace("Rule_", "") or 999)
+                    normalized = normalize_status(x.get("status"))
+                    return (status_order.get(normalized, 1), rule_num)
+                sorted_checks = sorted(rule_checks, key=get_sort_key)
 
-                    for check in sorted_checks:
-                        rule_id = check.get("rule_id", "")
-                        rule_content = check.get("rule_content", "") or rule_id
-                        check_status = (check.get("status") or "review").lower()
-                        if check_status == "warning":
-                            check_status = "review"
-                        if check_status not in ("pass", "review", "fail"):
-                            check_status = "review"
-                        confidence = check.get("confidence", 0)
+                for check in sorted_checks:
+                    rule_id = check.get("rule_id", "")
+                    rule_content = check.get("rule_content", "") or rule_id
+                    check_status = (check.get("status") or "review").lower()
+                    if check_status == "warning":
+                        check_status = "review"
+                    if check_status not in ("pass", "review", "fail"):
+                        check_status = "review"
+                    confidence = check.get("confidence", 0)
 
-                        badge_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}[check_status]
-                        lines.append(f"[{badge_text}] {rule_id}: {rule_content} (置信度: {confidence:.0%})")
+                    badge_text = {"pass": "PASS", "fail": "FAIL", "review": "REVIEW"}[check_status]
+                    lines.append(f"[{badge_text}] {rule_id}: {rule_content} (置信度: {confidence:.0%})")
 
             lines.append("")
 
@@ -890,9 +884,6 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             'html, body { font-family: "Microsoft YaHei", sans-serif; font-size: 13px; margin: 0; padding: 0; width: 100%; height: auto; }',
             'body { display: block; box-sizing: border-box; }',
             '.header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #dee2e6; width: 100%; box-sizing: border-box; }',
-            '.score-box { margin-right: 20px; }',
-            '.score-value { font-size: 24px; font-weight: bold; color: #333; }',
-            '.score-label { font-size: 12px; color: #666; }',
             '.status-badge { padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; }',
             '.summary-box { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 12px; width: 100%; box-sizing: border-box; }',
             '.summary-title { font-weight: bold; margin-bottom: 6px; color: #333; }',
@@ -913,9 +904,8 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             '</head><body>',
         ]
 
-        # 头部：分数和状态
+        # 头部：状态
         html_parts.append('<div class="header">')
-        html_parts.append(f'<div class="score-box"><div class="score-value">{score}</div><div class="score-label">分数</div></div>')
         html_parts.append(f'<span class="status-badge" style="background:{status_bg};color:{status_color};">{status_label}</span>')
         html_parts.append('</div>')
 
@@ -987,7 +977,7 @@ class StreamingAuditDisplay(StreamingTextDisplay):
             normalized_status = "review"
         status_label = status_map[normalized_status]
 
-        lines.append(f"【审核结果】 分数: {score} | 状态: {status_label}")
+        lines.append(f"【审核结果】 状态: {status_label}")
         lines.append("")
 
         if summary:
