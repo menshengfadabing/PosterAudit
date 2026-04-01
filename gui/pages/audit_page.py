@@ -114,18 +114,17 @@ class AuditPage(ScrollArea):
         batch_size_label = BodyLabel("每批合并:")
         self.batch_size_combo = ComboBox()
         self.batch_size_combo.addItems([
-            "自动计算",
-            "3 张/批（推荐）",
+            "自动优化（推荐）",
+            "3 张/批",
             "4 张/批",
-            "5 张/批（最大）"
+            "5 张/批"
         ])
         self.batch_size_combo.setToolTip(
             "单次API调用合并的图片数量\n"
-            "自动：根据Token动态计算\n"
-            "推荐：输出稳定，不易截断\n"
-            "最大：可能因规则较多导致输出截断"
+            "自动优化：根据图片数和API Key数动态计算最优批次\n"
+            "目标：最大化并行效率，减少Key闲置"
         )
-        self.batch_size_combo.setCurrentIndex(1)  # 默认推荐3张/批
+        self.batch_size_combo.setCurrentIndex(0)  # 默认自动优化
         batch_size_layout.addWidget(batch_size_label)
         batch_size_layout.addWidget(self.batch_size_combo, 1)
         left_layout.addLayout(batch_size_layout)
