@@ -112,7 +112,7 @@ class Issue(BaseModel):
 
 class AuditReport(BaseModel):
     """审核报告"""
-    score: int = Field(..., ge=0, le=100, description="合规分数 0-100")
+    score: int = Field(default=0, ge=0, le=100, description="合规分数（已废弃，不再使用）")
     status: AuditStatus = Field(..., description="审核状态")
     detection: DetectionResult = Field(default_factory=DetectionResult, description="检测结果")
     rule_checks: list[RuleCheckItem] = Field(default_factory=list, description="规则检查清单")

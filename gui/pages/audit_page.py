@@ -501,11 +501,6 @@ class AuditPage(ScrollArea):
             return lines
 
         if report:
-            # 显示分数
-            score = report.get("score", 0)
-            if score:
-                lines.append(f"分数: {score}")
-
             # 显示规则检查清单 - 使用导出报告格式
             rule_checks = report.get("rule_checks", [])
             if rule_checks:
@@ -718,7 +713,7 @@ class AuditPage(ScrollArea):
         html_parts.append('<div class="summary-title">【详细结果】</div>')
         html_parts.append('<table>')
         html_parts.append('<tr><th style="width:30px;">#</th><th style="width:150px;">文件名</th>'
-                         '<th style="width:60px;">状态</th><th style="width:50px;">分数</th>'
+                         '<th style="width:60px;">状态</th>'
                          '<th>规则检查 (FAIL/REVIEW)</th></tr>')
 
         for i, result in enumerate(results, 1):
@@ -731,7 +726,6 @@ class AuditPage(ScrollArea):
 
             # 获取报告数据
             report = result.get("report", {})
-            score = report.get("score", 0) if report else 0
 
             # 构建规则检查摘要（只显示FAIL和REVIEW的数量）
             rule_checks = report.get("rule_checks", []) if report else []
@@ -753,7 +747,6 @@ class AuditPage(ScrollArea):
             html_parts.append(f'<td>{i}</td>')
             html_parts.append(f'<td class="file-name">{file_name}</td>')
             html_parts.append(f'<td><span class="status-badge {status_class}">{status_label}</span></td>')
-            html_parts.append(f'<td class="score">{score}</td>')
             html_parts.append(f'<td>{rule_summary}</td>')
             html_parts.append(f'</tr>')
 
@@ -807,9 +800,6 @@ class AuditPage(ScrollArea):
                 continue
 
             if report:
-                score = report.get("score", 0)
-                lines.append(f"分数: {score}")
-
                 # 显示规则检查清单
                 rule_checks = report.get("rule_checks", [])
                 if rule_checks:
@@ -1073,8 +1063,6 @@ class AuditPage(ScrollArea):
         """将报告转换为Markdown"""
         lines = [
             "# 品牌合规审核报告",
-            "",
-            f"**分数**: {report.score}",
             "",
         ]
 
