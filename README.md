@@ -256,11 +256,12 @@ uv run python test/test_full_flow.py
                    └──────────────┘    └─────────────────┘
 ```
 
-#### API 端点（9个）
+#### API 端点（10个）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/v1/brands` | 上传品牌规范文档并解析 |
+| `POST` | `/api/v1/brands` | 上传单个品牌规范文档并解析 |
+| `POST` | `/api/v1/brands/merge` | 上传多个文档，合并解析为一份品牌规范 |
 | `GET` | `/api/v1/brands` | 列出所有品牌 |
 | `PUT` | `/api/v1/brands/{id}` | 更新/重解析品牌规范 |
 | `DELETE` | `/api/v1/brands/{id}` | 删除品牌 |
@@ -272,13 +273,25 @@ uv run python test/test_full_flow.py
 
 #### 本地启动
 
-```bash
-# 启动 API 服务
-DATABASE_URL=postgresql://user:pass@localhost/dbname uv run uvicorn web.main:app --port 8000
+**前提：** `.env` 文件已按上方「配置 API」章节填写好。
 
-# 启动 Streamlit 前端（另开终端）
-API_BASE_URL=http://localhost:8000 uv run streamlit run frontend/app.py --server.port 8501
+```bash
+# 1. 确保 PostgreSQL 已启动，并创建数据库
+createdb brand_audit   # 或使用已有数据库
+
+# 2. 在 .env 中补充 Web 配置（追加到已有 .env）
+echo "DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/brand_audit" >> .env
+
+# 3. 启动 API 服务（终端 1）
+uv run uvicorn web.main:app --host 0.0.0.0 --port 8000
+
+# 4. 启动 Streamlit 前端（终端 2）
+uv run streamlit run frontend/app.py --server.port 8501
 ```
+
+启动后访问 http://localhost:8501 即可使用 Web 界面。
+
+> **注意：** API 服务会在启动时自动读取 `.env` 中的 `OPENAI_API_KEY_0/1/2...` 索引 Key。若系统环境变量中存在旧的 `OPENAI_API_KEY`，`.env` 中的索引 Key 会优先覆盖它。
 
 #### Docker 部署
 
@@ -303,8 +316,9 @@ API_KEY=your_secret_key              # 若 API 开启认证则需要配置
 | 页面 | 功能 |
 |------|------|
 | 🔍 审核 | 上传设计稿（最多100张），选择品牌规范，查看逐规则审核结果 |
-| 📋 品牌管理 | 上传规范文档、管理参考图片（Logo标准件）|
+| 📋 品牌管理 | 上传规范文档（单文档或多文档合并）、管理参考图片（Logo标准件）|
 | 📁 历史 | 按品牌筛选历史任务，查看详细结果，分页浏览 |
+| ⚙️ API 配置 | 管理 DeepSeek / Doubao API Key，支持多 Key 添加、测试、保存 |
 
 ## 项目结构
 

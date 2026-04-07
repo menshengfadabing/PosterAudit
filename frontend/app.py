@@ -11,7 +11,7 @@ if str(_root) not in sys.path:
 
 import streamlit as st
 
-from frontend.pages import audit, brands, history
+from frontend.pages import audit, brands, history, settings
 
 
 def main():
@@ -28,7 +28,7 @@ def main():
 
     page = st.sidebar.radio(
         "导航",
-        ["🔍 审核", "📋 品牌管理", "📁 历史"],
+        ["🔍 审核", "📋 品牌管理", "📁 历史", "⚙️ 配置"],
         label_visibility="collapsed"
     )
 
@@ -42,6 +42,8 @@ def main():
         brands.render()
     elif page == "📁 历史":
         history.render()
+    elif page == "⚙️ 配置":
+        settings.render()
 
 
 if __name__ == "__main__":

@@ -168,13 +168,32 @@ def render():
                 st.success(f"审核完成，共 {len(images)} 张")
 
                 results = task.get("results") or []
-                if len(results) == 1:
-                    _render_result(results[0])
+                # batch_audit_merged 返回 {"file_name": ..., "status": ..., "report": {...}}
+                # 提取 report 字段；若已是平铺格式则直接使用
+                def _unwrap(r):
+                    if isinstance(r, dict) and "report" in r:
+                        report = r["report"] or {}
+                        report["_file_name"] = r.get("file_name", "")
+                        report["_error"] = r.get("error", "") if r.get("status") == "error" else ""
+                        return report
+                    return r
+
+                unwrapped = [_unwrap(r) for r in results]
+
+                if len(unwrapped) == 1:
+                    r = unwrapped[0]
+                    if r.get("_error"):
+                        st.error(f"审核失败：{r['_error']}")
+                    else:
+                        _render_result(r)
                 else:
-                    tabs = st.tabs([f"图片 {i+1}：{uploaded[i].name[:15]}" for i in range(len(results))])
-                    for i, (tab, result) in enumerate(zip(tabs, results)):
+                    tabs = st.tabs([f"图片 {i+1}：{uploaded[i].name[:15]}" for i in range(len(unwrapped))])
+                    for i, (tab, r) in enumerate(zip(tabs, unwrapped)):
                         with tab:
-                            _render_result(result, label=uploaded[i].name)
+                            if r.get("_error"):
+                                st.error(f"审核失败：{r['_error']}")
+                            else:
+                                _render_result(r, label=uploaded[i].name)
 
                 # 导出按钮
                 import json

@@ -114,7 +114,17 @@ async def _run_audit(
                 brand_id=brand_id,
                 max_images_per_request=batch_size,
             )
-            results = [r.model_dump(mode="json") if hasattr(r, "model_dump") else r for r in reports]
+            # batch_audit_merged 返回 [{"file_name": ..., "status": ..., "report": AuditReport}, ...]
+            # 需要将嵌套的 Pydantic 模型序列化为 plain dict
+            def _serialize(r):
+                if not isinstance(r, dict):
+                    return r.model_dump(mode="json") if hasattr(r, "model_dump") else r
+                out = dict(r)
+                if "report" in out and hasattr(out["report"], "model_dump"):
+                    out["report"] = out["report"].model_dump(mode="json")
+                return out
+
+            results = [_serialize(r) for r in reports]
 
             with SyncSession(engine) as s:
                 task = s.get(AuditTask, task_id)
@@ -165,7 +175,17 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
     return resp
 
 
-# ── 历史记录 ──────────────────────────────────────────────────────────────────
+@router.delete("/tasks/{task_id}", status_code=204)
+def delete_task(task_id: str, session: Session = Depends(get_session)):
+    """删除单条审核历史记录"""
+    task = session.get(AuditTask, task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+    session.delete(task)
+    session.commit()
+
+
+
 
 @router.get("/history")
 def list_history(
