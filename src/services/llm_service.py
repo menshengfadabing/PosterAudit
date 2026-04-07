@@ -14,7 +14,17 @@ logger = logging.getLogger(__name__)
 
 
 # 审核Prompt - 单图审核（精简输出）
-COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据规则清单审核设计稿。
+COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。按以下步骤审核设计稿：
+
+第一步：观察图片，识别以下要素：Logo位置/尺寸/变形情况、主要颜色、文字内容与字体、整体布局。
+第二步：逐条对照规则清单，基于第一步的观察结果作出判定。
+第三步：输出JSON。
+
+【判定标准】
+- p(pass): 图片中该项明确符合规则，可视觉确认
+- f(fail): 图片中该项明确违反规则，可视觉确认
+- r(review): 图中该项模糊/不可见/无法确认，需人工复核
+- c(置信度): 你对该判定的把握程度，0.0=完全不确定，1.0=完全确定
 
 【规则清单 - 共{rule_count}条】
 {rules_checklist}
@@ -34,9 +44,7 @@ COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据规则清
   "summary": "总体评价"
 }}
 
-字段说明:
-- results: 规则结果数组，id=规则ID，s=状态(p=pass/f=fail/r=review)，c=置信度
-- 必须为每条规则输出结果'''
+注意：无法从图中观察到的规则项（如字体名称不可见），置信度应低于0.5并标记为r。'''
 
 # 参考图片提示模板
 REFERENCE_IMAGE_PROMPT = '''
@@ -48,8 +56,14 @@ REFERENCE_IMAGE_PROMPT = '''
 '''
 
 # 批量审核Prompt - 多图合并（精简输出）
-BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。根据规则清单审核多张设计稿。
+BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。按以下步骤审核多张设计稿。
 {reference_hint}
+【判定标准】
+- p(pass): 该项明确符合规则，可视觉确认
+- f(fail): 该项明确违反规则，可视觉确认
+- r(review): 该项模糊/不可见/无法确认，需人工复核
+- c(置信度): 对该判定的把握程度，无法观察到的项置信度应<0.5
+
 【规则清单 - 共{rule_count}条】
 {rules_checklist}
 
@@ -476,16 +490,48 @@ class LLMService:
         return self._normalize_result(result)
 
     def _format_checklist(self, checklist: list[dict]) -> str:
-        """格式化规则清单为Prompt文本"""
+        """格式化规则清单为Prompt文本，附加分类判定提示"""
         if not checklist:
             return "无具体规则"
 
-        lines = []
+        # 按类别分组，同类规则聚合展示
+        category_map: dict[str, list[dict]] = {}
         for rule in checklist:
-            rule_id = rule.get("rule_id", "Rule_?")
-            content = rule.get("content", "")
-            category = rule.get("category", "")
-            lines.append(f"{rule_id}: {content} [{category}]")
+            cat = rule.get("category", "其他")
+            category_map.setdefault(cat, []).append(rule)
+
+        # 各类别的通用判定提示（帮助模型校准判断边界）
+        CATEGORY_HINTS = {
+            "Logo规范": "（判定时：位置/尺寸/变形可直接视觉确认；颜色需与规范色值对比）",
+            "Logo规范-颜色要求": "（判定时：对比Logo颜色与规范色值；颜色接近但不确定标r）",
+            "Logo规范-背景要求": "（判定时：观察Logo所在区域的背景色/对比度）",
+            "色彩规范": "（判定时：识别图中主要色块的十六进制值并与规范对比；色值差异>10%标f）",
+            "字体规范": "（判定时：若无法识别字体名称则标r，不要猜测；明显使用美术字/手写体可判定）",
+            "文案规范": "（判定时：读取图中所有文字，检查是否包含禁用词；文字不清晰时标r）",
+            "排版": "（判定时：观察元素间距、对齐、边距；无法量化时标r）",
+        }
+
+        lines = []
+        for cat, rules in category_map.items():
+            hint = CATEGORY_HINTS.get(cat, "")
+            # 只在该类别第一条前加类别标题
+            for i, rule in enumerate(rules):
+                rule_id = rule.get("rule_id", "Rule_?")
+                content = rule.get("content", "")
+                output_level = rule.get("output_level")
+
+                # 构建规则文本
+                rule_text = f"{rule_id}: {content} [{cat}]"
+
+                # 添加输出级别标签（如果存在）
+                if output_level:
+                    rule_text += f"[级别:{output_level}]"
+
+                # 第一条规则添加分类提示
+                if i == 0 and hint:
+                    rule_text += hint
+
+                lines.append(rule_text)
 
         return "\n".join(lines)
 

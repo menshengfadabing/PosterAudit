@@ -696,6 +696,16 @@ class AuditService:
                 # 解析置信度
                 confidence = llm_result.get("c") or llm_result.get("confidence", 0.0) or 0.0
 
+                # 置信度门控：低置信度的 pass/fail 结论降级为 review
+                # 避免模型"猜测"的结论被当作确定结论影响最终评级
+                CONFIDENCE_THRESHOLD = 0.5
+                if confidence < CONFIDENCE_THRESHOLD and status in ("pass", "fail"):
+                    logger.debug(
+                        f"{rule_id} 置信度过低({confidence:.2f})，"
+                        f"状态从 {status} 降级为 review"
+                    )
+                    status = "review"
+
                 rule_checks.append(RuleCheckItem(
                     rule_id=rule_id,
                     rule_content=rule.get("content", ""),

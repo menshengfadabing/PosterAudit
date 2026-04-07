@@ -191,6 +191,11 @@ class SecondaryRule(BaseModel):
     name: str = Field(default="", description="规则名称")
     content: str = Field(default="", description="规则内容")
     priority: int = Field(default=1, description="优先级: 1=重要, 2=一般, 3=参考")
+    # 结构化规则表字段（从Excel等结构化文档提取）
+    output_level: Optional[str] = Field(default=None, description="输出级别: FAIL/WARN/REVIEW等，None=未指定")
+    threshold: Optional[str] = Field(default=None, description="判定阈值/检测条件，如'长宽比偏差>2%'")
+    feedback_text: Optional[str] = Field(default=None, description="失败反馈文案")
+    rule_source_id: Optional[str] = Field(default=None, description="原始规则ID，如LOGO-01、COLOR-01、RISK-01")
 
 
 class ReferenceImage(BaseModel):

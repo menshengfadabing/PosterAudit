@@ -240,15 +240,25 @@ class RulesContextManager:
         rule_num = 1
         source_prefix = rules.source or rules.brand_name or "品牌规范"
 
-        def add_rule(content: str, category: str):
+        def add_rule(content: str, category: str, output_level: str = None,
+                     threshold: str = None, feedback_text: str = None, rule_source_id: str = None):
             nonlocal rule_num
             if content and content.strip():
-                checklist.append({
+                entry = {
                     "rule_id": f"Rule_{rule_num}",
                     "content": content.strip(),
                     "category": category,
-                    "reference": f"参考文档-{source_prefix}"
-                })
+                    "reference": f"参考文档-{source_prefix}",
+                }
+                if output_level:
+                    entry["output_level"] = output_level
+                if threshold:
+                    entry["threshold"] = threshold
+                if feedback_text:
+                    entry["feedback_text"] = feedback_text
+                if rule_source_id:
+                    entry["rule_source_id"] = rule_source_id
+                checklist.append(entry)
                 rule_num += 1
 
         # 1. Logo 规范
@@ -333,7 +343,14 @@ class RulesContextManager:
 
         # 6. 次要规范（排版、风格、高风险标签等）
         for sr in rules.secondary_rules:
-            add_rule(sr.content, sr.category)
+            add_rule(
+                sr.content,
+                sr.category,
+                output_level=sr.output_level,
+                threshold=sr.threshold,
+                feedback_text=sr.feedback_text,
+                rule_source_id=sr.rule_source_id
+            )
 
         return checklist
 
@@ -551,6 +568,42 @@ class RulesContextManager:
                 return True
 
         return False
+
+    def reparse_rules_from_raw_text(self, brand_id: str) -> Optional[BrandRules]:
+        """从 raw_text 重新解析规则（用于升级现有规则以提取结构化字段）"""
+        rules = self.get_rules(brand_id)
+        if rules is None:
+            logger.error(f"品牌规则不存在: {brand_id}")
+            return None
+
+        if not rules.raw_text:
+            logger.error(f"品牌规则缺少 raw_text 字段: {brand_id}")
+            return None
+
+        logger.info(f"开始重新解析品牌规则: {brand_id}")
+
+        # 导入 document_parser（延迟导入避免循环依赖）
+        from src.services.document_parser import document_parser
+
+        try:
+            # 使用 raw_text 重新解析
+            reparsed_rules = document_parser._extract_rules_with_llm(rules.raw_text)
+
+            # 保留原有的 brand_id、reference_images、upload_time
+            reparsed_rules.brand_id = rules.brand_id
+            reparsed_rules.reference_images = rules.reference_images
+            reparsed_rules.upload_time = rules.upload_time
+
+            # 更新缓存和持久化
+            self._cache[brand_id] = reparsed_rules
+            self._save_rules(brand_id, reparsed_rules)
+
+            logger.info(f"重新解析完成: {brand_id}, secondary_rules数量: {len(reparsed_rules.secondary_rules)}")
+            return reparsed_rules
+
+        except Exception as e:
+            logger.error(f"重新解析失败: {brand_id}, 错误: {e}")
+            return None
 
 
 # 全局规范上下文管理器实例
