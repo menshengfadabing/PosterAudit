@@ -181,18 +181,20 @@ class AuditReport(BaseModel):
 
 ## 快速开始
 
-### 1. 环境要求
+### 桌面应用（PySide6）
+
+#### 1. 环境要求
 
 - Python >= 3.12
 - uv 包管理器
 
-### 2. 安装依赖
+#### 2. 安装依赖
 
 ```bash
 uv sync
 ```
 
-### 3. 配置 API
+#### 3. 配置 API
 
 创建 `.env` 文件：
 
@@ -215,13 +217,13 @@ HTTPS_PROXY=socks5://127.0.0.1:1080
 
 > **多 API Key 说明**: 配置多个 Key 后，批量审核时各批次轮询使用不同 Key，避免 API 限流。GUI 设置页面支持动态添加/测试/删除 Key。
 
-### 4. 运行程序
+#### 4. 运行程序
 
 ```bash
 uv run python main.py
 ```
 
-### 5. 运行测试
+#### 5. 运行测试
 
 ```bash
 # 核心模块测试
@@ -231,15 +233,88 @@ uv run python test/test_core.py
 uv run python test/test_full_flow.py
 ```
 
+---
+
+### Web API + Streamlit 前端（服务器部署）
+
+平台同时提供 FastAPI REST API 和 Streamlit Web 前端，适合服务器部署和多用户访问。
+
+#### 服务架构
+
+```
+┌──────────────┐     HTTP      ┌──────────────┐
+│  Streamlit   │ ─────────── > │  FastAPI     │
+│  前端        │               │  API Server  │
+│  :8501       │               │  :8000       │
+└──────────────┘               └──────┬───────┘
+                                      │
+                           ┌──────────┴──────────┐
+                           │                     │
+                   ┌───────▼──────┐    ┌─────────▼───────┐
+                   │  PostgreSQL  │    │  文件存储         │
+                   │  (任务/品牌) │    │  data/uploads/  │
+                   └──────────────┘    └─────────────────┘
+```
+
+#### API 端点（9个）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/brands` | 上传品牌规范文档并解析 |
+| `GET` | `/api/v1/brands` | 列出所有品牌 |
+| `PUT` | `/api/v1/brands/{id}` | 更新/重解析品牌规范 |
+| `DELETE` | `/api/v1/brands/{id}` | 删除品牌 |
+| `POST` | `/api/v1/brands/{id}/images` | 上传参考图片（Logo标准件）|
+| `DELETE` | `/api/v1/brands/{id}/images/{filename}` | 删除参考图片 |
+| `POST` | `/api/v1/audit` | 提交审核任务（支持多图）|
+| `GET` | `/api/v1/tasks/{task_id}` | 查询任务状态和结果 |
+| `GET` | `/api/v1/history` | 分页查询审核历史 |
+
+#### 本地启动
+
+```bash
+# 启动 API 服务
+DATABASE_URL=postgresql://user:pass@localhost/dbname uv run uvicorn web.main:app --port 8000
+
+# 启动 Streamlit 前端（另开终端）
+API_BASE_URL=http://localhost:8000 uv run streamlit run frontend/app.py --server.port 8501
+```
+
+#### Docker 部署
+
+```bash
+# 启动 API 服务（加入已有的 Docker 网络）
+docker-compose -f docker-compose.web.yml up -d
+
+# 环境变量配置（docker-compose.web.yml 中设置）
+DATABASE_URL=postgresql://postgres:password@postgres:5432/brand_audit
+API_KEY=your_secret_key          # 可选，不配置则无需认证
+```
+
+#### Streamlit 前端环境变量
+
+```env
+API_BASE_URL=http://localhost:8000   # API 服务地址
+API_KEY=your_secret_key              # 若 API 开启认证则需要配置
+```
+
+#### Streamlit 功能页面
+
+| 页面 | 功能 |
+|------|------|
+| 🔍 审核 | 上传设计稿（最多100张），选择品牌规范，查看逐规则审核结果 |
+| 📋 品牌管理 | 上传规范文档、管理参考图片（Logo标准件）|
+| 📁 历史 | 按品牌筛选历史任务，查看详细结果，分页浏览 |
+
 ## 项目结构
 
 ```
 check_2/
-├── main.py                     # 应用入口
+├── main.py                     # 桌面应用入口
 ├── pyproject.toml              # 项目配置
 ├── build.spec                  # PyInstaller 打包配置
 │
-├── src/                        # 业务逻辑层
+├── src/                        # 业务逻辑层（桌面和Web共用）
 │   ├── models/
 │   │   └── schemas.py          # Pydantic 数据模型
 │   ├── services/
@@ -250,7 +325,25 @@ check_2/
 │   └── utils/
 │       └── config.py           # 配置管理
 │
-├── gui/                        # UI 层
+├── web/                        # Web API 层（FastAPI）
+│   ├── main.py                 # FastAPI 应用入口
+│   ├── deps.py                 # 数据库会话、认证依赖
+│   ├── models/
+│   │   └── db.py               # SQLModel 数据库模型
+│   └── routers/
+│       ├── brands.py           # 品牌管理路由（6个端点）
+│       └── audit.py            # 审核路由（3个端点）
+│
+├── frontend/                   # Web 前端（Streamlit）
+│   ├── app.py                  # Streamlit 主入口
+│   ├── config.py               # 前端配置
+│   ├── api_client.py           # API 调用封装
+│   └── pages/
+│       ├── audit.py            # 审核页面
+│       ├── brands.py           # 品牌管理页面
+│       └── history.py          # 历史记录页面
+│
+├── gui/                        # 桌面 UI 层（PySide6）
 │   ├── main_window.py          # 主窗口（FluentWindow）
 │   ├── pages/
 │   │   ├── audit_page.py       # 审核页面（流式显示、批次大小选择）
@@ -264,6 +357,10 @@ check_2/
 │   └── utils/
 │       ├── worker.py           # QThread 后台任务
 │       └── responsive.py       # 响应式布局
+│
+├── docker/
+│   └── web.dockerfile          # Web API Docker 镜像
+├── docker-compose.web.yml      # Web API + 数据库编排
 │
 ├── data/                       # 数据目录
 │   ├── rules/                  # 品牌规范存储
