@@ -39,11 +39,10 @@ def _get_allowed_keys() -> list[str]:
     return _ALLOWED_KEYS
 
 
-async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")) -> str:
-    """校验 API Key，Header 名称：X-API-Key"""
+async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> str | None:
+    """校验 API Key，Header 名称：X-API-Key。未配置 ALLOWED_API_KEYS 时跳过鉴权。"""
     allowed = _get_allowed_keys()
     if not allowed:
-        # 未配置任何 Key 时跳过鉴权（开发/测试模式）
         return x_api_key
     if x_api_key not in allowed:
         raise HTTPException(status_code=401, detail="Invalid API Key")
