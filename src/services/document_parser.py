@@ -417,7 +417,7 @@ class DocumentParser:
                 model=settings.deepseek_model,
                 base_url=settings.deepseek_api_base,
                 api_key=settings.deepseek_api_key,
-                temperature=0.1,
+                temperature=0,
                 timeout=120,  # 增加超时时间
             )
 
@@ -638,7 +638,7 @@ class DocumentParser:
                 model=settings.deepseek_model,
                 base_url=settings.deepseek_api_base,
                 api_key=settings.deepseek_api_key,
-                temperature=0.1,
+                temperature=0,
                 timeout=120,
             )
 

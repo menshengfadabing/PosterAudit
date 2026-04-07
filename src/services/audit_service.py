@@ -902,7 +902,7 @@ class AuditService:
                     model=settings.doubao_model,
                     base_url=settings.openai_api_base,
                     api_key=api_key,
-                    temperature=0.1,
+                    temperature=0,
                     timeout=180,
                     max_tokens=16384,
                 )

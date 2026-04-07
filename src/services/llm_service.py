@@ -138,7 +138,7 @@ class LLMService:
                 model=settings.doubao_model,
                 base_url=settings.openai_api_base,
                 api_key=api_key,
-                temperature=0.1,
+                temperature=0,
                 timeout=180,
                 max_tokens=16384,  # 16k 输出限制
             )
@@ -303,7 +303,7 @@ class LLMService:
                     model=settings.doubao_model,
                     base_url=settings.openai_api_base,
                     api_key=api_key,
-                    temperature=0.1,
+                    temperature=0,
                     timeout=180,
                     max_tokens=16384,
                 )
@@ -624,7 +624,7 @@ class LLMService:
                     model=settings.doubao_model,
                     base_url=settings.openai_api_base,
                     api_key=api_key,
-                    temperature=0.1,
+                    temperature=0,
                     timeout=300,
                     max_tokens=16384,
                 )
