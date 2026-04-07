@@ -1,0 +1,194 @@
+"""品牌规则 + 参考图片路由（6个接口）"""
+
+import shutil
+import uuid
+from pathlib import Path
+from typing import Annotated, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlmodel import Session, select
+
+from src.services.document_parser import document_parser
+from src.services.rules_context import rules_context
+from src.utils.config import get_app_dir
+from web.deps import get_session, verify_api_key
+from web.models.db import Brand, ReferenceImage
+
+router = APIRouter(dependencies=[Depends(verify_api_key)])
+
+IMAGES_BASE = get_app_dir() / "data" / "rules"
+
+
+# ── 品牌规则 ──────────────────────────────────────────────────────────────────
+
+@router.post("/brands", status_code=201)
+async def create_brand(
+    file: UploadFile = File(..., description="品牌规范文档（PDF/DOCX/XLSX/MD/TXT）"),
+    brand_name: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """上传品牌规范文档，解析并创建品牌规则"""
+    content = await file.read()
+    brand_rules = document_parser.parse_file(content, file.filename or "upload")
+
+    brand_id = f"brand_{uuid.uuid4().hex[:8]}"
+    brand_rules.brand_id = brand_id
+    brand_rules.brand_name = brand_name or brand_rules.brand_name or file.filename
+
+    # 持久化到 JSON 文件（复用现有 rules_context）
+    rules_context.add_rules(brand_rules, brand_id=brand_id)
+
+    # 写入数据库
+    db_brand = Brand(
+        id=brand_id,
+        name=brand_rules.brand_name,
+        version=brand_rules.version,
+        source=brand_rules.source,
+        rules_json=brand_rules.model_dump(mode="json"),
+        raw_text=brand_rules.raw_text,
+    )
+    session.add(db_brand)
+    session.commit()
+    session.refresh(db_brand)
+
+    return {"brand_id": brand_id, "brand_name": db_brand.name, "version": db_brand.version}
+
+
+@router.get("/brands")
+def list_brands(session: Session = Depends(get_session)):
+    """列出所有品牌"""
+    brands = session.exec(select(Brand)).all()
+    return [
+        {
+            "brand_id": b.id,
+            "brand_name": b.name,
+            "version": b.version,
+            "source": b.source,
+            "created_at": b.created_at,
+        }
+        for b in brands
+    ]
+
+
+@router.put("/brands/{brand_id}")
+async def update_brand(
+    brand_id: str,
+    action: str = Form("update", description="update=更新元信息；reparse=重新解析规则"),
+    brand_name: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+):
+    """
+    更新品牌信息或重新解析规则。
+
+    - `action=update`：更新品牌名称等元信息
+    - `action=reparse`：用已保存的 raw_text 重新调用 LLM 解析规则
+    """
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+
+    if action == "reparse":
+        reparsed = rules_context.reparse_rules_from_raw_text(brand_id)
+        if reparsed is None:
+            raise HTTPException(400, detail="重新解析失败，请检查 raw_text 是否存在")
+        brand.rules_json = reparsed.model_dump(mode="json")
+        brand.raw_text = reparsed.raw_text
+
+    if brand_name:
+        brand.name = brand_name
+
+    from datetime import datetime
+    brand.updated_at = datetime.now()
+    session.add(brand)
+    session.commit()
+    session.refresh(brand)
+
+    return {"brand_id": brand.id, "brand_name": brand.name, "action": action, "status": "ok"}
+
+
+@router.delete("/brands/{brand_id}", status_code=204)
+def delete_brand(brand_id: str, session: Session = Depends(get_session)):
+    """删除品牌规则"""
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+
+    # 删除关联参考图片记录
+    ref_imgs = session.exec(
+        select(ReferenceImage).where(ReferenceImage.brand_id == brand_id)
+    ).all()
+    for img in ref_imgs:
+        session.delete(img)
+
+    session.delete(brand)
+    session.commit()
+
+    # 同时清理文件系统（JSON + 图片目录）
+    rules_context.delete_rules(brand_id)
+
+
+# ── 参考图片 ──────────────────────────────────────────────────────────────────
+
+@router.post("/brands/{brand_id}/images", status_code=201)
+async def upload_reference_images(
+    brand_id: str,
+    files: list[UploadFile] = File(..., description="参考图片（Logo 标准件等），可批量上传"),
+    image_type: str = Form("logo"),
+    description: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    """上传参考图片（Logo 标准件）��有独立生命周期，可被所有审核任务复用"""
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+
+    added = []
+    for file in files:
+        content = await file.read()
+        ref = rules_context.add_reference_image(
+            brand_id=brand_id,
+            image_data=content,
+            filename=file.filename or f"{uuid.uuid4().hex}.png",
+            description=description,
+            image_type=image_type,
+        )
+        if ref is None:
+            continue
+
+        # 同步写入数据库
+        images_dir = IMAGES_BASE / brand_id / "images"
+        db_img = ReferenceImage(
+            brand_id=brand_id,
+            filename=ref.filename,
+            image_type=ref.image_type,
+            description=ref.description,
+            file_path=str(images_dir / ref.filename),
+            file_size=ref.file_size,
+        )
+        session.add(db_img)
+        added.append(ref.filename)
+
+    session.commit()
+    return {"brand_id": brand_id, "added": added}
+
+
+@router.delete("/brands/{brand_id}/images/{filename}", status_code=204)
+def delete_reference_image(
+    brand_id: str,
+    filename: str,
+    session: Session = Depends(get_session),
+):
+    """删除参考图片"""
+    db_img = session.exec(
+        select(ReferenceImage).where(
+            ReferenceImage.brand_id == brand_id,
+            ReferenceImage.filename == filename,
+        )
+    ).first()
+    if db_img:
+        session.delete(db_img)
+        session.commit()
+
+    ok = rules_context.delete_reference_image(brand_id, filename)
+    if not ok and db_img is None:
+        raise HTTPException(404, detail="参考图片不存在")

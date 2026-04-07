@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.13.0",
+    "asyncpg>=0.30.0",
+    "fastapi>=0.115.0",
     "httpx[socks]>=0.28.1",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
@@ -17,5 +20,9 @@ dependencies = [
     "pyside6-fluent-widgets>=1.6.0",
     "python-docx>=1.2.0",
     "python-pptx>=1.0.2",
+    "python-multipart>=0.0.9",
+    "psycopg2-binary>=2.9.9",
+    "sqlmodel>=0.0.21",
+    "uvicorn[standard]>=0.30.0",
     "xlrd>=2.0.2",
 ]
