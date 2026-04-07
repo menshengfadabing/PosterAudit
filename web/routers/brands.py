@@ -70,6 +70,49 @@ def list_brands(session: Session = Depends(get_session)):
     ]
 
 
+@router.post("/brands/merge", status_code=201)
+async def merge_brands(
+    files: list[UploadFile] = File(..., description="多个规范文档，合并解析为一个品牌规范"),
+    brand_name: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """上传多个规范文档，合并文本后用 LLM 解析为统一品牌规范"""
+    from pathlib import Path as _Path
+
+    all_texts: list[str] = []
+    for f in files:
+        content = await f.read()
+        text = document_parser.extract_text_only(content, f.filename or "upload")
+        if text:
+            all_texts.append(f"=== 文件: {_Path(f.filename or 'upload').name} ===\n{text}")
+
+    if not all_texts:
+        raise HTTPException(400, detail="所有文档均未提取到文本内容")
+
+    combined_text = "\n\n".join(all_texts)
+    brand_rules = document_parser._extract_rules_with_llm(combined_text, brand_name)
+    brand_rules.brand_name = brand_name
+    brand_rules.raw_text = combined_text
+
+    brand_id = f"brand_{uuid.uuid4().hex[:8]}"
+    brand_rules.brand_id = brand_id
+    rules_context.add_rules(brand_rules, brand_id=brand_id)
+
+    db_brand = Brand(
+        id=brand_id,
+        name=brand_name,
+        version=brand_rules.version,
+        source=", ".join(f.filename or "" for f in files),
+        rules_json=brand_rules.model_dump(mode="json"),
+        raw_text=combined_text,
+    )
+    session.add(db_brand)
+    session.commit()
+    session.refresh(db_brand)
+
+    return {"brand_id": brand_id, "brand_name": db_brand.name, "version": db_brand.version}
+
+
 @router.put("/brands/{brand_id}")
 async def update_brand(
     brand_id: str,

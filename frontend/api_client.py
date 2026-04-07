@@ -34,6 +34,19 @@ def create_brand(file_bytes: bytes, filename: str, brand_name: str) -> dict:
         return r.json()
 
 
+def merge_brands(files: list[tuple[str, bytes]], brand_name: str) -> dict:
+    """上传多个文档，合并解析为一个品牌规范"""
+    with _client() as c:
+        r = c.post(
+            "/api/v1/brands/merge",
+            data={"brand_name": brand_name},
+            files=[("files", (name, io.BytesIO(data), "application/octet-stream")) for name, data in files],
+            timeout=300.0,
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 def update_brand(brand_id: str, action: str = "update", brand_name: Optional[str] = None) -> dict:
     data: dict = {"action": action}
     if brand_name:
@@ -52,7 +65,7 @@ def delete_brand(brand_id: str) -> None:
 
 def upload_reference_images(
     brand_id: str,
-    files: list[tuple[str, bytes]],   # [(filename, bytes), ...]
+    files: list[tuple[str, bytes]],
     image_type: str = "logo",
     description: str = "",
 ) -> dict:
@@ -76,7 +89,7 @@ def delete_reference_image(brand_id: str, filename: str) -> None:
 
 def submit_audit(
     brand_id: str,
-    images: list[tuple[str, bytes]],   # [(filename, bytes), ...]
+    images: list[tuple[str, bytes]],
     mode: str = "async",
     batch_size: Optional[int] = None,
     compression: str = "balanced",
@@ -99,6 +112,12 @@ def get_task(task_id: str) -> dict:
         r = c.get(f"/api/v1/tasks/{task_id}")
         r.raise_for_status()
         return r.json()
+
+
+def delete_task(task_id: str) -> None:
+    with _client() as c:
+        r = c.delete(f"/api/v1/tasks/{task_id}")
+        r.raise_for_status()
 
 
 def list_history(brand_id: Optional[str] = None, page: int = 1, page_size: int = 20) -> dict:
