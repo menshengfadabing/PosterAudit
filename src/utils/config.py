@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     data_dir: str = ""
     log_level: str = "INFO"
 
+    # Web API 配置
+    database_url: str = "postgresql+psycopg2://postgres:postgres123456@localhost:5432/app"
+    allowed_api_keys: str = ""   # 逗号分隔；为空时跳过鉴权（开发模式）
+    upload_dir: str = ""
+
     # 缓存配置
     cache_enabled: bool = True
     cache_ttl: int = 3600
