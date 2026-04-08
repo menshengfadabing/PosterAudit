@@ -28,109 +28,100 @@ logger = logging.getLogger(__name__)
 # 品牌规范解析 Prompt（DeepSeek 文本模型）
 PARSE_SYSTEM_PROMPT = """你是品牌规范文档解析专家。请从品牌规范文档中提取结构化规则信息。
 
-【重要】规则分为两类，不可混淆：
+【规则分类】共四类，严格区分：
 
-一、【主要规范】- 固定三项，这是品牌识别的核心要素：
+一、【前置条件 preconditions】- 审核前需用户填写的表单字段（如"品牌标识情况"、"传播类型"、"物料类型"等）。
+这类内容绝对不能放入 secondary_rules，必须单独放入 preconditions 数组。
+
+二、【主要规范】- 固定三项核心要素：
 1. color（色彩）：主色、辅助色、禁用色、配色规则
-2. logo：位置描述、尺寸范围、安全间距、颜色要求、背景要求、其他规则
+2. logo：位置、尺寸、安全间距、颜色要求、背景要求、其他规则
 3. font（字体）：允许字体、禁用字体、字号规则、其他规则
 
-注意：主要规范仅包含以上三项！不要把其他内容放入主要规范！
+三、【次要规范 secondary_rules】- 除色彩/Logo/字体/前置条件外的所有审核规则，按原文编号逐条提取。
 
-二、【次要规范】- 除色彩/Logo/字体外的所有其他规则，按以下分类整理：
-- 排版：边距、对齐、图文关系、版面布局、留白等
-- 文案：禁用词、必须包含内容、文字规范等
-- 风格：品牌调性（如阳光、健康、专业）、视觉风格等
-- 高风险标签：需要特别避免的问题标签
-- 其他：不属于以上分类的内容
+【核心要求：三段式判定条件】
+每条 secondary_rules 必须包含三个判定条件字段，无论原文是否明确写出，都必须由你推断填写：
 
-【输出格式要求】- 动态生成，完整提取：
+- fail_condition：描述判定为"违规(fail)"的具体情况（客观可判断的红线）
+- review_condition：描述需要"人工复核(review)"的情况（模棱两可、需主观判断、机器难以确认）
+- pass_condition：描述判定为"合规(pass)"的情况
 
-输出JSON格式，尽可能完整保留文档中的所有规则：
+判断原则：
+- 客观、可量化的违规（Logo缺失、颜色明显不符、字体数超限）→ fail_condition 写具体阈值
+- 主观审美类（品牌调性-阳光/健康/专业/生态、风格适配、系列一致性）→ review_condition 要详细写，fail_condition 只写极端情况
+- 图中看不清楚、无法确认的情况 → 写入 review_condition
+
+【输出JSON格式】：
 ```json
 {
   "brand_name": "品牌名称",
+  "preconditions": [
+    {
+      "field_name": "品牌标识情况",
+      "required": true,
+      "type": "单选",
+      "options": ["包含（作为常规品牌标识）", "包含（Logo即为画面核心主体）", "无（特殊说明）"],
+      "logic": "若选Logo即为画面核心主体，豁免Logo位置和尺寸判定，仅保留颜色与形变校验；若选无，跳过所有Logo规则"
+    }
+  ],
   "color": {
     "primary": {"name": "颜色名称", "value": "#XXXXXX"},
-    "secondary": [
-      {"name": "名称1", "value": "#XXXXXX"},
-      {"name": "名称2", "value": "#XXXXXX"}
-    ],
-    "forbidden": [
-      {"name": "名称", "value": "#XXXXXX", "reason": "原因"}
-    ],
+    "secondary": [],
+    "forbidden": [],
     "description": "整体色彩风格描述",
-    "additional_rules": [
-      "配色结构比例建议3:6:1",
-      "色系数量控制在3种以内",
-      "其他色彩相关规则..."
-    ]
+    "additional_rules": ["配色结构建议60%主色/30%辅助色/10%点缀色"]
   },
   "logo": {
-    "position": "top_left 或 top_right 或 center",
+    "position": "top_left",
     "position_description": "位置描述",
     "size_range": {"min": 5, "max": 15},
     "safe_margin_px": 20,
-    "min_display_ratio": "Logo高度不得低于画面高度的4.2%",
-    "color_requirements": [
-      "Logo必须使用品牌标准色或K100黑色",
-      "不得擅自改色"
-    ],
-    "background_requirements": [
-      "Logo应与背景明度匹配",
-      "深色背景使用反白版本"
-    ],
-    "additional_rules": [
-      "Logo不得被拉伸、压缩、变形",
-      "Logo周围不得被文字或图形侵入",
-      "其他Logo相关规则..."
-    ]
+    "min_display_ratio": "竖版画面Logo高度不得低于画面总高度的4%；横版不得低于6%",
+    "color_requirements": ["Logo必须使用标准蓝版(#113655)、反白版或黑白/墨稿版"],
+    "background_requirements": ["Logo应与背景明度匹配，确保高识别度"],
+    "additional_rules": ["Logo不得被拉伸、压缩、变形"]
   },
   "font": {
-    "allowed": ["字体1", "字体2", "字体3"],
-    "forbidden": ["字体4", "字体5"],
-    "size_rules": {"heading": "18-24px", "body": "12-14px"},
-    "note": "字体使用备注",
-    "additional_rules": [
-      "单个版面字体数量控制在3种以内",
-      "字体应清晰、规范、易读",
-      "其他字体相关规则..."
-    ]
+    "allowed": ["无衬线字体"],
+    "forbidden": ["低质花体字", "低质书法字"],
+    "size_rules": {},
+    "note": "备注",
+    "additional_rules": ["单个版面排版字体数量不超过3种"]
   },
   "secondary_rules": [
     {
-      "category": "排版", "name": "边距要求", "content": "上下左右边距不小于20px", "priority": 1,
-      "rule_source_id": "LAYOUT-01", "output_level": "WARN",
-      "threshold": "边距<20px时触发", "feedback_text": "请确保页面四周留有足够的安全边距"
+      "category": "Logo",
+      "name": "品牌Logo是否缺失",
+      "content": "正式成稿或正式传播画面中应出现品牌Logo或联合标识",
+      "priority": 1,
+      "rule_source_id": "H-LOGO-01",
+      "fail_condition": "正式传播物料中完全未检测到任何品牌Logo或联合标识",
+      "review_condition": "画面用途不明确，无法确认是否属于正式传播物料；Logo区域被遮挡或模糊无法确认",
+      "pass_condition": "画面中可清晰识别品牌Logo或联合标识"
     },
     {
-      "category": "文案", "name": "禁用词", "content": "禁止使用：最佳、第一、顶级", "priority": 1,
-      "rule_source_id": null, "output_level": "FAIL", "threshold": null, "feedback_text": null
-    },
-    {
-      "category": "风格", "name": "品牌调性", "content": "阳光、健康、专业、生态", "priority": 1,
-      "rule_source_id": null, "output_level": null, "threshold": null, "feedback_text": null
+      "category": "品牌调性",
+      "name": "阳光",
+      "content": "画面整体情感基调必须明亮、通透、有活力，禁止呈现消极或衰退暗示的视觉表达",
+      "priority": 1,
+      "rule_source_id": "H-BRAND-01",
+      "fail_condition": "画面整体明显阴暗压抑消极，存在强烈下坡/希望感缺失等极端负向表达，已严重违背品牌调性",
+      "review_condition": "画面氛围偏沉稳或中性，不确定是否符合阳光调性；存在部分暗色元素但整体氛围不明确；需结合使用场景综合判断",
+      "pass_condition": "画面整体明亮开阔，色彩饱和度高，传达出积极向上的视觉感受"
     }
   ]
 }
 ```
 
-严格执行规则：
-1. 颜色值必须是十六进制格式如 #00A4FF，如果文档中没有明确色值，根据描述推断或留空
-2. 主要规范(color/logo/font)仅提取这三项核心内容，其他都放入secondary_rules
-3. 【重要】additional_rules数组用于存储该类别下的所有额外规则，不要遗漏
-4. secondary_rules中不得重复包含色彩、Logo、字体相关内容（已放入主规范的additional_rules中）
-5. priority: 1=重要, 2=一般, 3=参考
+严格执行：
+1. 颜色值必须是十六进制格式如 #113655，文档中没有明确色值则留空
+2. 前置条件表单字段（品牌标识情况、是否联合品牌logo、合作主导关系、传播类型、物料类型、使用渠道、补充说明等）必须放入 preconditions，绝对不能放入 secondary_rules
+3. secondary_rules 必须按原文编号逐条提取，不得合并，不得遗漏
+4. 每条 secondary_rules 必须填写 fail_condition、review_condition、pass_condition 三个字段，即使原文没有明确写出，也必须根据规则内容推断填写，不得为空或null
+5. priority: 1=重要(客观可判断规则), 2=一般(主观判断规则), 3=参考
 6. 如果文档未提及某项主要规范，该字段设为null
-7. 【重要】尽可能完整提取所有规则，不要遗漏或截断
-8. 只输出JSON，不要其他文字
-9. 【Excel规则表提取】若文档包含结构化规则表（含rule_id/规则编号、输出级别、阈值、反馈文案等列），
-   必须逐行提取，不得概括合并。每行规则对应secondary_rules中的一个条目，保留：
-   - rule_source_id: 原始规则编号（如LOGO-01、COLOR-01、RISK-01）
-   - output_level: 输出级别（如FAIL、WARN、REVIEW，原文保留）
-   - threshold: 工程检测阈值原文（如"长宽比偏差>2%"、"色差ΔE>10"）
-   - feedback_text: 失败时向用户展示的反馈文案（原文保留）
-   若文档未包含这些字段，对应值设为null"""
+7. 只输出JSON，不要其他文字"""
 
 # 支持的文档格式
 SUPPORTED_FORMATS = {
@@ -497,6 +488,10 @@ class DocumentParser:
             if data.get("secondary_rules"):
                 self._parse_secondary_rules(rules, data["secondary_rules"])
 
+            # 解析前置条件
+            if data.get("preconditions"):
+                rules.preconditions = data["preconditions"]
+
             logger.info(f"LLM规则提取完成: brand_name={rules.brand_name}, "
                        f"color={rules.color is not None}, "
                        f"logo={rules.logo is not None}, "
@@ -642,6 +637,8 @@ class DocumentParser:
             self._parse_layout_rules(rules, data["layout"])
         if data.get("secondary_rules"):
             self._parse_secondary_rules(rules, data["secondary_rules"])
+        if data.get("preconditions"):
+            rules.preconditions = data["preconditions"]
 
         return rules
 
@@ -776,10 +773,15 @@ class DocumentParser:
                     name=item.get("name", ""),
                     content=item.get("content", ""),
                     priority=item.get("priority", 1),
+                    rule_source_id=item.get("rule_source_id") or None,
+                    # 新三段式字段
+                    fail_condition=item.get("fail_condition") or None,
+                    review_condition=item.get("review_condition") or None,
+                    pass_condition=item.get("pass_condition") or None,
+                    # 旧字段兼容
                     output_level=item.get("output_level") or None,
                     threshold=item.get("threshold") or None,
                     feedback_text=item.get("feedback_text") or None,
-                    rule_source_id=item.get("rule_source_id") or None,
                 )
                 rules.secondary_rules.append(rule)
 

@@ -490,48 +490,40 @@ class LLMService:
         return self._normalize_result(result)
 
     def _format_checklist(self, checklist: list[dict]) -> str:
-        """格式化规则清单为Prompt文本，附加分类判定提示"""
+        """格式化规则清单为Prompt文本"""
         if not checklist:
             return "无具体规则"
 
-        # 按类别分组，同类规则聚合展示
-        category_map: dict[str, list[dict]] = {}
-        for rule in checklist:
-            cat = rule.get("category", "其他")
-            category_map.setdefault(cat, []).append(rule)
-
-        # 各类别的通用判定提示（帮助模型校准判断边界）
-        CATEGORY_HINTS = {
-            "Logo规范": "（判定时：位置/尺寸/变形可直接视觉确认；颜色需与规范色值对比）",
-            "Logo规范-颜色要求": "（判定时：对比Logo颜色与规范色值；颜色接近但不确定标r）",
-            "Logo规范-背景要求": "（判定时：观察Logo所在区域的背景色/对比度）",
-            "色彩规范": "（判定时：识别图中主要色块的十六进制值并与规范对比；色值差异>10%标f）",
-            "字体规范": "（判定时：若无法识别字体名称则标r，不要猜测；明显使用美术字/手写体可判定）",
-            "文案规范": "（判定时：读取图中所有文字，检查是否包含禁用词；文字不清晰时标r）",
-            "排版": "（判定时：观察元素间距、对齐、边距；无法量化时标r）",
-        }
-
         lines = []
-        for cat, rules in category_map.items():
-            hint = CATEGORY_HINTS.get(cat, "")
-            # 只在该类别第一条前加类别标题
-            for i, rule in enumerate(rules):
-                rule_id = rule.get("rule_id", "Rule_?")
-                content = rule.get("content", "")
+        for rule in checklist:
+            rule_id = rule.get("rule_id", "Rule_?")
+            content = rule.get("content", "")
+            cat = rule.get("category", "")
+
+            rule_text = f"{rule_id}: {content} [{cat}]"
+
+            # 优先展示三段式判定条件
+            fail_cond = rule.get("fail_condition")
+            review_cond = rule.get("review_condition")
+            pass_cond = rule.get("pass_condition")
+
+            if fail_cond or review_cond or pass_cond:
+                if fail_cond:
+                    rule_text += f"\n  → FAIL: {fail_cond}"
+                if review_cond:
+                    rule_text += f"\n  → REVIEW: {review_cond}"
+                if pass_cond:
+                    rule_text += f"\n  → PASS: {pass_cond}"
+            else:
+                # 旧格式兼容：用 output_level + threshold
                 output_level = rule.get("output_level")
-
-                # 构建规则文本
-                rule_text = f"{rule_id}: {content} [{cat}]"
-
-                # 添加输出级别标签（如果存在）
+                threshold = rule.get("threshold")
                 if output_level:
-                    rule_text += f"[级别:{output_level}]"
+                    rule_text += f" [级别:{output_level}]"
+                if threshold:
+                    rule_text += f"\n  → 判定条件: {threshold}"
 
-                # 第一条规则添加分类提示
-                if i == 0 and hint:
-                    rule_text += hint
-
-                lines.append(rule_text)
+            lines.append(rule_text)
 
         return "\n".join(lines)
 

@@ -23,6 +23,9 @@ def parse_json_response(content: str) -> Optional[dict | list]:
     if not content:
         return None
 
+    # 预处理：将中文弯引号替换为转义直引号，避免 JSON 解析失败
+    content = content.replace('\u201c', '\\"').replace('\u201d', '\\"')
+
     # 方法1: 尝试直接解析
     try:
         return json.loads(content)

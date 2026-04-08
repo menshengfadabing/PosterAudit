@@ -12,7 +12,7 @@ from src.services.document_parser import document_parser
 from src.services.rules_context import rules_context
 from src.utils.config import get_app_dir
 from web.deps import get_session, verify_api_key
-from web.models.db import Brand, ReferenceImage
+from web.models.db import AuditTask, Brand, ReferenceImage
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
@@ -29,7 +29,7 @@ async def create_brand(
 ):
     """上传品牌规范文档，解析并创建品牌规则"""
     content = await file.read()
-    brand_rules = document_parser.parse_file(content, file.filename or "upload")
+    brand_rules = document_parser.parse(content, file.filename or "upload")
 
     brand_id = f"brand_{uuid.uuid4().hex[:8]}"
     brand_rules.brand_id = brand_id
@@ -65,6 +65,7 @@ def list_brands(session: Session = Depends(get_session)):
             "version": b.version,
             "source": b.source,
             "created_at": b.created_at,
+            "rules_json": b.rules_json,
         }
         for b in brands
     ]
@@ -113,6 +114,23 @@ async def merge_brands(
     return {"brand_id": brand_id, "brand_name": db_brand.name, "version": db_brand.version}
 
 
+@router.get("/brands/{brand_id}")
+def get_brand(brand_id: str, session: Session = Depends(get_session)):
+    """获取单个品牌完整规则"""
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+    return {
+        "brand_id": brand.id,
+        "brand_name": brand.name,
+        "version": brand.version,
+        "source": brand.source,
+        "created_at": brand.created_at,
+        "rules_json": brand.rules_json,
+        "raw_text": brand.raw_text,
+    }
+
+
 @router.put("/brands/{brand_id}")
 async def update_brand(
     brand_id: str,
@@ -156,12 +174,20 @@ def delete_brand(brand_id: str, session: Session = Depends(get_session)):
     if not brand:
         raise HTTPException(404, detail="品牌不存在")
 
-    # 删除关联参考图片记录
+    # 删除关联审核任务
+    audit_tasks = session.exec(
+        select(AuditTask).where(AuditTask.brand_id == brand_id)
+    ).all()
+    for task in audit_tasks:
+        session.delete(task)
+
+    # 删除关联参考图片记录（先 flush，确保外键约束顺序正确）
     ref_imgs = session.exec(
         select(ReferenceImage).where(ReferenceImage.brand_id == brand_id)
     ).all()
     for img in ref_imgs:
         session.delete(img)
+    session.flush()  # 先执行子表 DELETE，再删父表
 
     session.delete(brand)
     session.commit()

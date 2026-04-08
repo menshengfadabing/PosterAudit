@@ -240,8 +240,10 @@ class RulesContextManager:
         rule_num = 1
         source_prefix = rules.source or rules.brand_name or "品牌规范"
 
-        def add_rule(content: str, category: str, output_level: str = None,
-                     threshold: str = None, feedback_text: str = None, rule_source_id: str = None):
+        def add_rule(content: str, category: str, rule_source_id: str = None,
+                     fail_condition: str = None, review_condition: str = None, pass_condition: str = None,
+                     # 旧字段兼容
+                     output_level: str = None, threshold: str = None, feedback_text: str = None):
             nonlocal rule_num
             if content and content.strip():
                 entry = {
@@ -250,14 +252,19 @@ class RulesContextManager:
                     "category": category,
                     "reference": f"参考文档-{source_prefix}",
                 }
-                if output_level:
-                    entry["output_level"] = output_level
-                if threshold:
-                    entry["threshold"] = threshold
-                if feedback_text:
-                    entry["feedback_text"] = feedback_text
                 if rule_source_id:
                     entry["rule_source_id"] = rule_source_id
+                if fail_condition:
+                    entry["fail_condition"] = fail_condition
+                if review_condition:
+                    entry["review_condition"] = review_condition
+                if pass_condition:
+                    entry["pass_condition"] = pass_condition
+                # 旧字段兼容（新规则用三段式，旧规则可能只有这些）
+                if output_level and not fail_condition:
+                    entry["output_level"] = output_level
+                if threshold and not fail_condition:
+                    entry["threshold"] = threshold
                 checklist.append(entry)
                 rule_num += 1
 
@@ -346,10 +353,13 @@ class RulesContextManager:
             add_rule(
                 sr.content,
                 sr.category,
+                rule_source_id=sr.rule_source_id,
+                fail_condition=sr.fail_condition,
+                review_condition=sr.review_condition,
+                pass_condition=sr.pass_condition,
                 output_level=sr.output_level,
                 threshold=sr.threshold,
                 feedback_text=sr.feedback_text,
-                rule_source_id=sr.rule_source_id
             )
 
         return checklist

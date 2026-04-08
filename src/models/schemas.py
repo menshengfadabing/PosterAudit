@@ -189,13 +189,17 @@ class SecondaryRule(BaseModel):
     """次要规范项"""
     category: str = Field(default="", description="分类：排版、文案、风格、高风险标签等")
     name: str = Field(default="", description="规则名称")
-    content: str = Field(default="", description="规则内容")
+    content: str = Field(default="", description="规则内容（简要描述规则意图）")
     priority: int = Field(default=1, description="优先级: 1=重要, 2=一般, 3=参考")
-    # 结构化规则表字段（从Excel等结构化文档提取）
-    output_level: Optional[str] = Field(default=None, description="输出级别: FAIL/WARN/REVIEW等，None=未指定")
-    threshold: Optional[str] = Field(default=None, description="判定阈值/检测条件，如'长宽比偏差>2%'")
-    feedback_text: Optional[str] = Field(default=None, description="失败反馈文案")
     rule_source_id: Optional[str] = Field(default=None, description="原始规则ID，如LOGO-01、COLOR-01、RISK-01")
+    # 三段式判定条件（新格式）
+    fail_condition: Optional[str] = Field(default=None, description="判定为FAIL的具体条件")
+    review_condition: Optional[str] = Field(default=None, description="判定为REVIEW的条件（需人工复核的情况）")
+    pass_condition: Optional[str] = Field(default=None, description="判定为PASS的条件")
+    # 旧字段（保留向后兼容）
+    output_level: Optional[str] = Field(default=None, description="[旧字段] 输出级别")
+    threshold: Optional[str] = Field(default=None, description="[旧字段] 判定阈值")
+    feedback_text: Optional[str] = Field(default=None, description="[旧字段] 失败反馈文案")
 
 
 class ReferenceImage(BaseModel):
@@ -222,6 +226,9 @@ class BrandRules(BaseModel):
 
     # 次要规范（动态列表）
     secondary_rules: list[SecondaryRule] = Field(default_factory=list, description="次要规范列表")
+
+    # 前置条件（审核前填写的表单字段）
+    preconditions: list[dict] = Field(default_factory=list, description="前置条件表单字段")
 
     # 标准参考图片（Logo等）
     reference_images: list[ReferenceImage] = Field(default_factory=list, description="标准参考图片列表")
