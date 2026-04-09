@@ -148,8 +148,8 @@ class LogoRules(BaseModel):
     """Logo规范"""
     position: str = Field(default="", description="位置标识")
     position_description: str = Field(default="", description="位置描述")
-    size_range: dict[str, int] = Field(default_factory=lambda: {"min": 5, "max": 10}, description="尺寸范围")
-    safe_margin_px: int = Field(default=20, description="安全间距")
+    size_range: Optional[dict[str, Optional[int]]] = Field(default=None, description="尺寸范围（LLM未返回时为None）")
+    safe_margin_px: Optional[int] = Field(default=None, description="安全间距（LLM未返回时为None）")
     additional_rules: list[str] = Field(default_factory=list, description="其他Logo相关规则")
     min_display_ratio: Optional[str] = Field(default=None, description="最小显示比例")
     color_requirements: list[str] = Field(default_factory=list, description="颜色要求")

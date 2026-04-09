@@ -961,5 +961,18 @@ class LLMService:
             return False, f"连接失败: {error_msg[:50]}"
 
 
+    # ── 异步包装方法（供 async FastAPI 路由直接 await，避免阻塞事件循环）──────────
+
+    async def async_audit_image(self, *args, **kwargs) -> dict:
+        """audit_image 的异步版本，用 asyncio.to_thread 包裹"""
+        import asyncio
+        return await asyncio.to_thread(self.audit_image, *args, **kwargs)
+
+    async def async_audit_images_batch_stream(self, *args, **kwargs) -> list:
+        """audit_images_batch_stream 的异步版本"""
+        import asyncio
+        return await asyncio.to_thread(self.audit_images_batch_stream, *args, **kwargs)
+
+
 # 全局LLM服务实例
 llm_service = LLMService()

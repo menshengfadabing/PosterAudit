@@ -29,7 +29,7 @@ async def create_brand(
 ):
     """上传品牌规范文档，解析并创建品牌规则"""
     content = await file.read()
-    brand_rules = document_parser.parse(content, file.filename or "upload")
+    brand_rules = await document_parser.async_parse(content, file.filename or "upload")
 
     brand_id = f"brand_{uuid.uuid4().hex[:8]}"
     brand_rules.brand_id = brand_id
@@ -83,7 +83,7 @@ async def merge_brands(
     all_texts: list[str] = []
     for f in files:
         content = await f.read()
-        text = document_parser.extract_text_only(content, f.filename or "upload")
+        text = await document_parser.async_extract_text_only(content, f.filename or "upload")
         if text:
             all_texts.append(f"=== 文件: {_Path(f.filename or 'upload').name} ===\n{text}")
 
@@ -91,7 +91,7 @@ async def merge_brands(
         raise HTTPException(400, detail="所有文档均未提取到文本内容")
 
     combined_text = "\n\n".join(all_texts)
-    brand_rules = document_parser._extract_rules_with_llm(combined_text, brand_name)
+    brand_rules = await document_parser.async_extract_rules_with_llm(combined_text, brand_name)
     brand_rules.brand_name = brand_name
     brand_rules.raw_text = combined_text
 
@@ -149,7 +149,7 @@ async def update_brand(
         raise HTTPException(404, detail="品牌不存在")
 
     if action == "reparse":
-        reparsed = rules_context.reparse_rules_from_raw_text(brand_id)
+        reparsed = await rules_context.async_reparse_rules_from_raw_text(brand_id)
         if reparsed is None:
             raise HTTPException(400, detail="重新解析失败，请检查 raw_text 是否存在")
         brand.rules_json = reparsed.model_dump(mode="json")
@@ -194,6 +194,21 @@ def delete_brand(brand_id: str, session: Session = Depends(get_session)):
 
     # 同时清理文件系统（JSON + 图片目录）
     rules_context.delete_rules(brand_id)
+
+
+@router.get("/brands/{brand_id}/checklist")
+def get_brand_checklist(brand_id: str, session: Session = Depends(get_session)):
+    """获取品牌规则检查清单（供前端预览和导出使用）"""
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+    checklist = rules_context.get_rules_checklist(brand_id)
+    return {
+        "brand_id": brand_id,
+        "brand_name": brand.name,
+        "total": len(checklist),
+        "checklist": checklist,
+    }
 
 
 # ── 参考图片 ──────────────────────────────────────────────────────────────────

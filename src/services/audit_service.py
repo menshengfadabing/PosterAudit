@@ -254,6 +254,7 @@ class AuditService:
         progress_callback=None,
         stream_callback=None,
         result_callback=None,
+        preconditions: Optional[dict] = None,
     ) -> list:
         """
         合并请求批量审核（单次API调用处理多张图片，流式输出JSON）
@@ -302,8 +303,8 @@ class AuditService:
             if progress_callback:
                 progress_callback(preprocessed_count, total, f"预处理图片 {preprocessed_count}/{total}")
 
-        # 获取品牌规范
-        rules_checklist = rules_context.get_rules_checklist(brand_id)
+        # 获取品牌规范（传入前置条件进行规则过滤）
+        rules_checklist = rules_context.get_rules_checklist(brand_id, preconditions=preconditions)
         rules_text = rules_context.get_rules_text(brand_id)  # 用于计算token
 
         # 获取参考图片

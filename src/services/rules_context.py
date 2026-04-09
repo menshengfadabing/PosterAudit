@@ -221,9 +221,21 @@ class RulesContextManager:
 
         return "\n".join(lines)
 
-    def get_rules_checklist(self, brand_id: Optional[str] = None) -> list[dict]:
+    def get_rules_checklist(self, brand_id: Optional[str] = None, preconditions: Optional[dict] = None) -> list[dict]:
         """
         获取规则检查清单（用于 LLM Prompt）
+
+        Args:
+            brand_id: 品牌ID
+            preconditions: 前置条件字典，含以下字段：
+                - brand_status: 'normal' | 'main_subject' | 'none'
+                - joint_brand: 'none' | 'internal' | 'external'
+                - collab_lead: 'xunfei' | 'partner'（joint_brand=external 时）
+                - department: str（joint_brand=internal 时）
+                - comm_type: str
+                - material_type: str
+                - channels: list[str]
+                - notes: str
 
         Returns:
             规则列表，每条规则包含:
@@ -362,7 +374,108 @@ class RulesContextManager:
                 feedback_text=sr.feedback_text,
             )
 
+        # 7. 根据前置条件过滤 + 注入上下文
+        if preconditions:
+            checklist = self._apply_preconditions(checklist, preconditions)
+
         return checklist
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 前置条件豁免逻辑
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # 各业务规则的 rule_source_id 映射（以讯飞新规则为准）
+    _LOGO_POSITION_IDS = {"H-LOGO-05"}        # Logo 位于规范位置（左上角）
+    _LOGO_SIZE_IDS     = {"H-LOGO-06"}        # Logo 相对尺寸合规
+    _LOGO_JOINT_IDS    = {"H-LOGO-08", "H-LOGO-10"}  # 联合标识分割线 + 主次顺序
+
+    def _apply_preconditions(self, checklist: list[dict], preconditions: dict) -> list[dict]:
+        """
+        根据前置条件对规则清单进行豁免过滤和上下文注入。
+
+        豁免策略：
+          brand_status=main_subject → 豁免 Logo 位置、尺寸规则（只保留颜色/形变）
+          brand_status=none         → 豁免全部 Logo 规则
+          joint_brand=none          → 豁免联合标识相关规则（H-LOGO-08、H-LOGO-10）
+          collab_lead=partner       → 豁免 Logo 位置（左上角）、尺寸下限
+
+        上下文注入：
+          将关键前置条件以 [前置条件] 标签追加到相关规则的 content，
+          供 LLM 参考（不修改 fail/review/pass_condition）。
+        """
+        brand_status = preconditions.get("brand_status", "normal")
+        joint_brand  = preconditions.get("joint_brand", "none")
+        collab_lead  = preconditions.get("collab_lead")
+        comm_type    = preconditions.get("comm_type", "")
+        material_type = preconditions.get("material_type", "")
+        channels     = preconditions.get("channels", [])
+        notes        = preconditions.get("notes", "")
+
+        # ── 计算豁免的 rule_source_id 集合 ──────────────────────────────────
+        exempt_ids: set[str] = set()
+
+        if brand_status == "none":
+            # 跳过所有 Logo 规则（分类含 Logo 的）
+            exempt_ids.update(self._LOGO_POSITION_IDS | self._LOGO_SIZE_IDS | self._LOGO_JOINT_IDS)
+
+        elif brand_status == "main_subject":
+            # Logo 是核心主体，豁免位置和尺寸约束
+            exempt_ids.update(self._LOGO_POSITION_IDS | self._LOGO_SIZE_IDS)
+
+        if joint_brand == "none":
+            # 没有联合品牌，联合标识规则无意义
+            exempt_ids.update(self._LOGO_JOINT_IDS)
+
+        if collab_lead == "partner":
+            # 对方主导，讯飞 Logo 不必在左上角，也没有尺寸下限
+            exempt_ids.update(self._LOGO_POSITION_IDS | self._LOGO_SIZE_IDS)
+
+        # ── 构建上下文标注字符串（注入到受影响规则的 content）──────────────
+        ctx_parts = []
+        if comm_type:
+            ctx_parts.append(f"传播类型={comm_type}")
+        if material_type:
+            ctx_parts.append(f"物料类型={material_type}")
+        if channels:
+            ctx_parts.append(f"使用渠道={'、'.join(channels)}")
+        if joint_brand != "none" and collab_lead:
+            ctx_parts.append(f"合作主导关系={'讯飞主导' if collab_lead == 'xunfei' else '对方主导'}")
+        if notes:
+            ctx_parts.append(f"补充说明={notes}")
+        context_tag = f"[前置条件] {'; '.join(ctx_parts)}" if ctx_parts else ""
+
+        # ── 过滤 + 注入 ───────────────────────────────────────────────────
+        filtered = []
+        for rule in checklist:
+            src_id = rule.get("rule_source_id", "")
+
+            # 1. 豁免：直接跳过
+            if src_id in exempt_ids:
+                logger.debug(f"豁免规则 {src_id}（前置条件: brand_status={brand_status}, "
+                             f"joint_brand={joint_brand}, collab_lead={collab_lead}）")
+                continue
+
+            # 2. brand_status=none 时，跳过分类含"Logo"的规则（无 rule_source_id 的通用 Logo 规则）
+            if brand_status == "none" and "Logo" in rule.get("category", ""):
+                logger.debug(f"豁免Logo规则（无src_id）: {rule.get('rule_id')}")
+                continue
+
+            # 3. 注入上下文到受上下文影响的规则
+            if context_tag:
+                # 对联合标识主次规则（H-LOGO-10）注入合作主导关系，对调性规则注入传播类型
+                if src_id in ("H-LOGO-10",) or "调性" in rule.get("category", "") or "场景" in rule.get("category", ""):
+                    rule = dict(rule)  # 浅拷贝，避免污染原始 checklist
+                    rule["content"] = rule["content"] + f"\n{context_tag}"
+
+            filtered.append(rule)
+
+        # 重新编号 rule_id（保持连续）
+        for i, rule in enumerate(filtered, start=1):
+            rule["rule_id"] = f"Rule_{i}"
+
+        logger.info(f"前置条件过滤：原始规则 {len(checklist)} 条 → 过滤后 {len(filtered)} 条"
+                    f"（豁免 {len(checklist) - len(filtered)} 条）")
+        return filtered
 
     def list_rules(self) -> list[dict[str, Any]]:
         """列出所有品牌规范"""
@@ -614,6 +727,11 @@ class RulesContextManager:
         except Exception as e:
             logger.error(f"重新解析失败: {brand_id}, 错误: {e}")
             return None
+
+    async def async_reparse_rules_from_raw_text(self, brand_id: str) -> Optional[BrandRules]:
+        """reparse_rules_from_raw_text 的异步版本，避免阻塞事件循环"""
+        import asyncio
+        return await asyncio.to_thread(self.reparse_rules_from_raw_text, brand_id)
 
 
 # 全局规范上下文管理器实例

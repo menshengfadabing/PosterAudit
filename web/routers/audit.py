@@ -29,17 +29,28 @@ async def submit_audit(
     mode: str = Form("async", description="async=异步（返回task_id轮询）；sync=同步（直接等待结果）"),
     batch_size: Optional[int] = Form(None, description="每批图片数，默认 auto"),
     compression: str = Form("balanced", description="压缩预设：high_quality/balanced/high_compression/no_compression"),
+    preconditions: Optional[str] = Form(None, description="前置条件 JSON 字符串"),
     session: Session = Depends(get_session),
 ):
     """
     提交审核任务，待审核图片随请求内联上传。
 
     - `mode=async`：立即返回 task_id，客户端通过 GET /tasks/{task_id} 轮询结果
-    - `mode=sync`：等待审核完成后直接返回结果（���合单张小图快速测试）
+    - `mode=sync`：等待审核完成后直接返回结果（适合单张小图快速测试）
     """
+    import json as _json
+
     brand = session.get(Brand, brand_id)
     if not brand:
         raise HTTPException(404, detail="品牌不存在")
+
+    # 解析前置条件
+    preconditions_dict: Optional[dict] = None
+    if preconditions:
+        try:
+            preconditions_dict = _json.loads(preconditions)
+        except Exception:
+            raise HTTPException(400, detail="preconditions 格式错误，需要合法的 JSON 字符串")
 
     # 保存上传文件到临时目录
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -59,6 +70,7 @@ async def submit_audit(
         "batch_size": batch_size,
         "compression": compression,
         "filenames": [p.split("/")[-1] for p in image_paths],
+        "preconditions": preconditions_dict,
     }
 
     # 写入任务记录
@@ -73,13 +85,13 @@ async def submit_audit(
 
     if mode == "sync":
         # 同步模式：直接在当前线程中运行，等待完成
-        results = await _run_audit(task_id, brand_id, image_paths, batch_size, compression)
+        results = await _run_audit(task_id, brand_id, image_paths, batch_size, compression, preconditions_dict)
         # 刷新获取最新结果
         session.refresh(task)
         return {"task_id": task_id, "status": task.status, "results": task.results}
 
     # 异步模式：在后台任务中运行
-    background_tasks.add_task(_run_audit, task_id, brand_id, image_paths, batch_size, compression)
+    background_tasks.add_task(_run_audit, task_id, brand_id, image_paths, batch_size, compression, preconditions_dict)
     return {"task_id": task_id, "status": "pending", "created_at": task.created_at}
 
 
@@ -89,6 +101,7 @@ async def _run_audit(
     image_paths: list[str],
     batch_size: Optional[int],
     compression: str,
+    preconditions: Optional[dict] = None,
 ) -> list:
     """在线程池中执行同步审核，不阻塞事件循环"""
     from sqlmodel import Session as SyncSession
@@ -113,6 +126,7 @@ async def _run_audit(
                 image_paths=image_paths,
                 brand_id=brand_id,
                 max_images_per_request=batch_size,
+                preconditions=preconditions,
             )
             # batch_audit_merged 返回 [{"file_name": ..., "status": ..., "report": AuditReport}, ...]
             # 需要将嵌套的 Pydantic 模型序列化为 plain dict

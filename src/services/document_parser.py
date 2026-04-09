@@ -429,7 +429,8 @@ class DocumentParser:
                 base_url=settings.deepseek_api_base,
                 api_key=settings.deepseek_api_key,
                 temperature=0,
-                timeout=120,  # 增加超时时间
+                timeout=300,  # 规则文档输出量大，需要更长超时
+                max_tokens=16384,  # 规则文档解析输出量大，必须显式设置
             )
 
             messages = [
@@ -437,9 +438,15 @@ class DocumentParser:
                 HumanMessage(content=user_prompt),
             ]
 
-            logger.info("正在调用LLM...")
-            response = llm.invoke(messages)
-            content = response.content
+            logger.info("正在调用LLM（非流式，超时300s）...")
+            try:
+                response = llm.invoke(messages)
+                content = response.content
+            except Exception as invoke_err:
+                # 非流式超时时回退到流式，逐chunk接收避免超时
+                logger.warning(f"非流式调用失败({invoke_err})，回退到流式接收...")
+                return self._extract_rules_with_llm_stream(text, filename)
+
             logger.info(f"LLM响应长度: {len(content)} 字符")
             logger.debug(f"LLM响应内容: {content[:1000]}...")
 
@@ -448,7 +455,16 @@ class DocumentParser:
 
             if data is None:
                 logger.error("无法从LLM响应中解析JSON")
-                logger.error(f"原始响应: {content}")
+                # 写入完整响应到文件，方便排查（日志终端会截断）
+                try:
+                    import time
+                    dump_path = Path(__file__).parent.parent.parent / "docs" / f"llm_response_dump_{int(time.time())}.txt"
+                    dump_path.parent.mkdir(parents=True, exist_ok=True)
+                    dump_path.write_text(content, encoding="utf-8")
+                    logger.error(f"完整LLM响应已写入: {dump_path}  (共{len(content)}字符)")
+                except Exception as dump_err:
+                    logger.error(f"写入dump失败: {dump_err}")
+                    logger.error(f"原始响应(前500字符): {content[:500]}")
                 return BrandRules(
                     brand_id="",
                     brand_name="",
@@ -567,7 +583,8 @@ class DocumentParser:
                 base_url=settings.deepseek_api_base,
                 api_key=settings.deepseek_api_key,
                 temperature=0,
-                timeout=120,
+                timeout=300,
+                max_tokens=16384,  # 规则文档解析输出量大，必须显式设置
             )
 
             messages = [
@@ -609,6 +626,14 @@ class DocumentParser:
 
         if data is None:
             logger.error("无法从LLM响应中解析JSON")
+            try:
+                import time
+                dump_path = Path(__file__).parent.parent.parent / "docs" / f"llm_response_dump_{int(time.time())}.txt"
+                dump_path.parent.mkdir(parents=True, exist_ok=True)
+                dump_path.write_text(full_content, encoding="utf-8")
+                logger.error(f"完整LLM响应已写入: {dump_path}  (共{len(full_content)}字符)")
+            except Exception:
+                pass
             return BrandRules(
                 brand_id="",
                 brand_name="",
@@ -693,25 +718,34 @@ class DocumentParser:
         """解析Logo规则"""
         size_range = logo_data.get("size_range")
 
+        # 只在 LLM 明确返回了 size_range 时才解析，避免注入虚假默认值
         if size_range is None:
-            size_range = {"min": 5, "max": 15}
+            parsed_size_range = None
         elif isinstance(size_range, str):
             numbers = re.findall(r'(\d+\.?\d*)', size_range)
-            size_range = {
-                "min": int(float(numbers[0])) if numbers else 5,
-                "max": int(float(numbers[1])) if len(numbers) > 1 else 15
+            parsed_size_range = {
+                "min": int(float(numbers[0])) if numbers else None,
+                "max": int(float(numbers[1])) if len(numbers) > 1 else None,
             }
         elif isinstance(size_range, dict):
-            size_range = {
-                "min": int(float(size_range.get("min", 5) or 5)),
-                "max": int(float(size_range.get("max", 15) or 15))
+            min_val = size_range.get("min")
+            max_val = size_range.get("max")
+            parsed_size_range = {
+                "min": int(float(min_val)) if min_val is not None else None,
+                "max": int(float(max_val)) if max_val is not None else None,
             }
+        else:
+            parsed_size_range = None
+
+        # safe_margin_px：只在 LLM 明确返回时才设置
+        raw_margin = logo_data.get("safe_margin_px")
+        safe_margin = int(float(raw_margin)) if raw_margin is not None else None
 
         rules.logo = LogoRules(
             position=logo_data.get("position", "") or "",
             position_description=logo_data.get("position_description", "") or "",
-            size_range=size_range,
-            safe_margin_px=int(logo_data.get("safe_margin_px", 20) or 20),
+            size_range=parsed_size_range,
+            safe_margin_px=safe_margin,
             additional_rules=[r for r in (logo_data.get("additional_rules") or []) if r],
             min_display_ratio=logo_data.get("min_display_ratio") or logo_data.get("min_size_ratio"),
             color_requirements=[r for r in (logo_data.get("color_requirements") or []) if r],
@@ -882,6 +916,24 @@ class DocumentParser:
             return file_data.decode('utf-8', errors='ignore')
 
         return ""
+
+
+    # ── 异步包装方法 ──────────────────────────────────────────────────────────────
+
+    async def async_parse(self, file_data: bytes, filename: str) -> "BrandRules":
+        """parse 的异步版本，避免阻塞事件循环（LLM HTTP 调用是同步阻塞的）"""
+        import asyncio
+        return await asyncio.to_thread(self.parse, file_data, filename)
+
+    async def async_extract_rules_with_llm(self, text: str, filename: str) -> "BrandRules":
+        """_extract_rules_with_llm 的异步版本"""
+        import asyncio
+        return await asyncio.to_thread(self._extract_rules_with_llm, text, filename)
+
+    async def async_extract_text_only(self, file_data: bytes, filename: str) -> str:
+        """extract_text_only 的异步版本（PDF/PPT 解析也可能耗时）"""
+        import asyncio
+        return await asyncio.to_thread(self.extract_text_only, file_data, filename)
 
 
 # 全局文档解析器实例
