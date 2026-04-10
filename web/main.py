@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
 from web.deps import engine
-from web.routers import audit, brands
+from web.routers import audit, brands, review, stats
 
 app = FastAPI(
     title="品牌合规审核 API",
@@ -40,6 +40,8 @@ app.add_middleware(
 
 app.include_router(brands.router, prefix="/api/v1", tags=["品牌规则"])
 app.include_router(audit.router,  prefix="/api/v1", tags=["审核"])
+app.include_router(review.router, prefix="/api/v1", tags=["人工复核"])
+app.include_router(stats.router,  prefix="/api/v1", tags=["统计"])
 
 
 @app.on_event("startup")

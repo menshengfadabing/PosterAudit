@@ -5,7 +5,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, desc
 
 from src.services.audit_service import audit_service
@@ -30,6 +32,9 @@ async def submit_audit(
     batch_size: Optional[int] = Form(None, description="每批图片数，默认 auto"),
     compression: str = Form("balanced", description="压缩预设：high_quality/balanced/high_compression/no_compression"),
     preconditions: Optional[str] = Form(None, description="前置条件 JSON 字符串"),
+    image_purpose: Optional[str] = Form(None, description="图片用途"),
+    project_type: Optional[str] = Form(None, description="项目类型"),
+    project_desc: Optional[str] = Form(None, description="项目描述"),
     session: Session = Depends(get_session),
 ):
     """
@@ -73,10 +78,17 @@ async def submit_audit(
         "preconditions": preconditions_dict,
     }
 
+    # 取第一个文件名作为素材名称
+    material_name = images[0].filename if images else None
+
     # 写入任务记录
     task = AuditTask(
         id=task_id,
         brand_id=brand_id,
+        name=material_name,
+        image_purpose=image_purpose,
+        project_type=project_type,
+        project_desc=project_desc,
         status="pending",
         input_meta=input_meta,
     )
@@ -106,6 +118,7 @@ async def _run_audit(
     """在线程池中执行同步审核，不阻塞事件循环"""
     from sqlmodel import Session as SyncSession
     from web.deps import engine
+    from datetime import datetime as _datetime
 
     def _do_audit():
         # 设置压缩预设
@@ -117,10 +130,11 @@ async def _run_audit(
             task = s.get(AuditTask, task_id)
             if task:
                 task.status = "running"
-                task.updated_at = datetime.now()
+                task.updated_at = _datetime.now()
                 s.add(task)
                 s.commit()
 
+        start_time = _datetime.now()
         try:
             reports = audit_service.batch_audit_merged(
                 image_paths=image_paths,
@@ -140,12 +154,22 @@ async def _run_audit(
 
             results = [_serialize(r) for r in reports]
 
+            # 计算耗时
+            elapsed_seconds = int((_datetime.now() - start_time).total_seconds())
+
+            # 生成 formatted_report 和 machine_result
+            formatted_report = _generate_formatted_report(results)
+            machine_result = _determine_machine_result(formatted_report)
+
             with SyncSession(engine) as s:
                 task = s.get(AuditTask, task_id)
                 if task:
                     task.status = "completed"
                     task.results = results
-                    task.updated_at = datetime.now()
+                    task.formatted_report = formatted_report
+                    task.duration_seconds = elapsed_seconds
+                    task.machine_result = machine_result
+                    task.updated_at = _datetime.now()
                     s.add(task)
                     s.commit()
 
@@ -157,13 +181,91 @@ async def _run_audit(
                 if task:
                     task.status = "failed"
                     task.error = str(e)
-                    task.updated_at = datetime.now()
+                    task.updated_at = _datetime.now()
                     s.add(task)
                     s.commit()
             raise
 
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _do_audit)
+
+
+def _generate_formatted_report(results: list) -> dict:
+    """生成格式化后的审核报告，包含 rule_checks / issues / summary 供前端直接渲染"""
+    if not results:
+        return {"rule_checks": [], "violations": [], "passed_rules": [], "issues": [], "summary": ""}
+
+    all_rule_checks = []
+    violations = []
+    passed_rules = set()
+    all_issues = []
+    summaries = []
+
+    for result in results:
+        report = result.get("report", {})
+        rule_checks = report.get("rule_checks", [])
+        issues = report.get("issues", [])
+        summary = report.get("summary", "")
+
+        if summary:
+            summaries.append(summary)
+
+        # 收集问题列表
+        for issue in issues:
+            if isinstance(issue, dict):
+                all_issues.append({
+                    "title": issue.get("type", ""),
+                    "description": issue.get("description", issue.get("detail", "")),
+                })
+
+        # 收集规则检查明细
+        for rc in rule_checks:
+            rule_id = rc.get("rule_id", "")
+            rule_content = rc.get("rule_content", "")
+            status = rc.get("status", "").lower()
+            confidence = rc.get("confidence", 0.0)
+            detail = rc.get("detail", "")
+            reference = rc.get("reference", "")
+
+            all_rule_checks.append({
+                "rule_id": rule_id,
+                "rule_content": rule_content,
+                "status": status,
+                "confidence": confidence,
+                "detail": detail,
+                "reference": reference,
+            })
+
+            if status in ("fail",):
+                violations.append({
+                    "id": rule_id,
+                    "type": "hard",
+                    "rule": rule_content,
+                    "description": detail,
+                    "severity": "high" if confidence > 0.8 else "medium",
+                })
+            elif status in ("pass",):
+                passed_rules.add(rule_content)
+
+    return {
+        "rule_checks": all_rule_checks,
+        "violations": violations,
+        "passed_rules": list(passed_rules),
+        "issues": all_issues,
+        "summary": " ".join(summaries),
+    }
+
+
+def _determine_machine_result(formatted_report: dict) -> str:
+    """根据规则检查结果确定机审结论：fail → failed，review → manual_review，否则 passed"""
+    rule_checks = formatted_report.get("rule_checks", [])
+    has_fail = any(rc.get("status") in ("fail",) for rc in rule_checks)
+    has_review = any(rc.get("status") in ("review", "warning") for rc in rule_checks)
+    if has_fail:
+        return "failed"
+    if has_review:
+        return "manual_review"
+    return "passed"
 
 
 # ── 任务查询 ──────────────────────────────────────────────────────────────────
@@ -178,6 +280,10 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
     resp = {
         "task_id": task.id,
         "brand_id": task.brand_id,
+        "name": task.name,
+        "image_purpose": task.image_purpose,
+        "project_type": task.project_type,
+        "project_desc": task.project_desc,
         "status": task.status,
         "input_meta": task.input_meta,
         "created_at": task.created_at,
@@ -186,6 +292,9 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
     }
     if task.status == "completed":
         resp["results"] = task.results
+        resp["formatted_report"] = task.formatted_report
+        resp["duration_seconds"] = task.duration_seconds
+        resp["machine_result"] = task.machine_result
     return resp
 
 
@@ -223,12 +332,104 @@ def list_history(
         "items": [
             {
                 "task_id": t.id,
+                "name": t.name,
                 "brand_id": t.brand_id,
-                "status": t.status,
-                "image_count": (t.input_meta or {}).get("image_count", 0),
+                "machine_result": t.machine_result,
                 "created_at": t.created_at,
+                "duration": t.duration_seconds,
+                "status": t.status,
+                "formatted_report": t.formatted_report,
                 "results": t.results,
             }
             for t in tasks
         ],
     }
+
+
+@router.post("/tasks/{task_id}/request-review")
+def request_review(task_id: str, session: Session = Depends(get_session)):
+    """申请人工复核"""
+    task = session.get(AuditTask, task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(400, detail="只有已完成的任务才能申请人工复核")
+
+    task.status = "pending_review"
+    task.updated_at = datetime.now()
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+
+    return {"task_id": task_id, "status": "pending_review", "message": "已提交人工复核"}
+
+
+@router.get("/tasks/{task_id}/export")
+def export_report(
+    task_id: str,
+    format: str = Query("json", description="导出格式：json/markdown"),
+    session: Session = Depends(get_session),
+):
+    """导出审核报告（json 或 markdown 格式）"""
+    task = session.get(AuditTask, task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(400, detail="任务尚未完成，无法导出报告")
+
+    if format == "json":
+        import json
+        content = json.dumps({
+            "task_id": task.id,
+            "name": task.name,
+            "brand_id": task.brand_id,
+            "machine_result": task.machine_result,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "duration_seconds": task.duration_seconds,
+            "formatted_report": task.formatted_report,
+            "results": task.results,
+        }, ensure_ascii=False, indent=2)
+        return StreamingResponse(
+            iter([content.encode("utf-8")]),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=audit-report-{task_id}.json"},
+        )
+
+    elif format == "markdown":
+        report = task.formatted_report or {}
+        violations = report.get("violations", [])
+        passed_rules = report.get("passed_rules", [])
+
+        lines = [
+            f"# 审核报告 - {task.name or task_id}",
+            f"",
+            f"- **任务 ID**: {task.id}",
+            f"- **机审结果**: {task.machine_result or '-'}",
+            f"- **审核时间**: {task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else '-'}",
+            f"- **耗时**: {task.duration_seconds}s" if task.duration_seconds else "- **耗时**: -",
+            f"",
+            f"## 违规项（{len(violations)}）",
+            f"",
+        ]
+        for v in violations:
+            lines.append(f"- [{v.get('type','').upper()}] **{v.get('rule','')}**")
+            if v.get("description"):
+                lines.append(f"  - 说明：{v['description']}")
+        if not violations:
+            lines.append("无违规项")
+
+        lines += [f"", f"## 通过规则（{len(passed_rules)}）", f""]
+        for r in passed_rules:
+            lines.append(f"- ✓ {r}")
+        if not passed_rules:
+            lines.append("无")
+
+        content = "\n".join(lines)
+        return StreamingResponse(
+            iter([content.encode("utf-8")]),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f"attachment; filename=audit-report-{task_id}.md"},
+        )
+
+    else:
+        raise HTTPException(400, detail="format 必须是 json 或 markdown")

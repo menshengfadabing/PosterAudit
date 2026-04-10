@@ -64,6 +64,7 @@ def list_brands(session: Session = Depends(get_session)):
             "brand_name": b.name,
             "version": b.version,
             "source": b.source,
+            "status": b.status,
             "created_at": b.created_at,
             "rules_json": b.rules_json,
         }
@@ -125,6 +126,7 @@ def get_brand(brand_id: str, session: Session = Depends(get_session)):
         "brand_name": brand.name,
         "version": brand.version,
         "source": brand.source,
+        "status": brand.status,
         "created_at": brand.created_at,
         "rules_json": brand.rules_json,
         "raw_text": brand.raw_text,
@@ -165,6 +167,31 @@ async def update_brand(
     session.refresh(brand)
 
     return {"brand_id": brand.id, "brand_name": brand.name, "action": action, "status": "ok"}
+
+
+@router.patch("/brands/{brand_id}/status")
+def update_brand_status(
+    brand_id: str,
+    status: str = Form(..., description="品牌状态：active/inactive/archived"),
+    session: Session = Depends(get_session),
+):
+    """更新品牌状态"""
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+
+    allowed = ("active", "inactive", "archived")
+    if status not in allowed:
+        raise HTTPException(400, detail=f"status 必须是 {allowed} 之一")
+
+    brand.status = status
+    from datetime import datetime
+    brand.updated_at = datetime.now()
+    session.add(brand)
+    session.commit()
+    session.refresh(brand)
+
+    return {"brand_id": brand.id, "brand_name": brand.name, "status": brand.status}
 
 
 @router.delete("/brands/{brand_id}", status_code=204)

@@ -225,156 +225,60 @@ class RulesContextManager:
         """
         获取规则检查清单（用于 LLM Prompt）
 
+        规则来源：仅使用 secondary_rules，按 Logo→色彩→字体→其他 分类排序。
+        主规范结构化字段（color/logo/font）不再单独生成规则条目，避免与 secondary_rules 重复。
+
         Args:
             brand_id: 品牌ID
-            preconditions: 前置条件字典，含以下字段：
-                - brand_status: 'normal' | 'main_subject' | 'none'
-                - joint_brand: 'none' | 'internal' | 'external'
-                - collab_lead: 'xunfei' | 'partner'（joint_brand=external 时）
-                - department: str（joint_brand=internal 时）
-                - comm_type: str
-                - material_type: str
-                - channels: list[str]
-                - notes: str
+            preconditions: 前置条件字典
 
         Returns:
-            规则列表，每条规则包含:
-            - rule_id: Rule_1, Rule_2...
-            - content: 规则内容
-            - category: 分类名
-            - reference: 参考文档来源
+            规则列表，每条规则包含 rule_id、content、category、reference 等字段
         """
         rules = self.get_rules(brand_id)
         if rules is None:
             return []
 
-        checklist = []
-        rule_num = 1
         source_prefix = rules.source or rules.brand_name or "品牌规范"
 
-        def add_rule(content: str, category: str, rule_source_id: str = None,
-                     fail_condition: str = None, review_condition: str = None, pass_condition: str = None,
-                     # 旧字段兼容
-                     output_level: str = None, threshold: str = None, feedback_text: str = None):
-            nonlocal rule_num
-            if content and content.strip():
-                entry = {
-                    "rule_id": f"Rule_{rule_num}",
-                    "content": content.strip(),
-                    "category": category,
-                    "reference": f"参考文档-{source_prefix}",
-                }
-                if rule_source_id:
-                    entry["rule_source_id"] = rule_source_id
-                if fail_condition:
-                    entry["fail_condition"] = fail_condition
-                if review_condition:
-                    entry["review_condition"] = review_condition
-                if pass_condition:
-                    entry["pass_condition"] = pass_condition
-                # 旧字段兼容（新规则用三段式，旧规则可能只有这些）
-                if output_level and not fail_condition:
-                    entry["output_level"] = output_level
-                if threshold and not fail_condition:
-                    entry["threshold"] = threshold
-                checklist.append(entry)
-                rule_num += 1
+        # 分类排序权重：Logo → 色彩 → 字体 → 其他
+        def category_order(category: str) -> int:
+            c = category.lower()
+            if "logo" in c or "标识" in c:
+                return 0
+            if "色彩" in c or "颜色" in c or "color" in c:
+                return 1
+            if "字体" in c or "排版" in c or "font" in c or "type" in c:
+                return 2
+            return 3
 
-        # 1. Logo 规范
-        if rules.logo:
-            logo_category = "Logo规范"
-            # additional_rules
-            for rule in rules.logo.additional_rules:
-                add_rule(rule, logo_category)
-            # color_requirements
-            for rule in rules.logo.color_requirements:
-                add_rule(rule, f"{logo_category}-颜色要求")
-            # background_requirements
-            for rule in rules.logo.background_requirements:
-                add_rule(rule, f"{logo_category}-背景要求")
-            # 基本规则
-            if rules.logo.position_description:
-                add_rule(f"Logo位置应位于{rules.logo.position_description}", logo_category)
-            if rules.logo.size_range:
-                min_size = rules.logo.size_range.get("min", 5)
-                max_size = rules.logo.size_range.get("max", 15)
-                add_rule(f"Logo尺寸应占图片宽度的{min_size}%-{max_size}%", logo_category)
-            if rules.logo.safe_margin_px:
-                add_rule(f"Logo四周应保留至少{rules.logo.safe_margin_px}px安全边距", logo_category)
-            if rules.logo.min_display_ratio:
-                add_rule(rules.logo.min_display_ratio, logo_category)
+        sorted_rules = sorted(rules.secondary_rules, key=lambda r: category_order(r.category))
 
-        # 2. 色彩规范
-        if rules.color:
-            color_category = "色彩规范"
-            # additional_rules
-            for rule in rules.color.additional_rules:
-                add_rule(rule, color_category)
-            # 主色
-            if rules.color.primary:
-                add_rule(f"主色应为{rules.color.primary.value}({rules.color.primary.name})", color_category)
-            # 辅助色
-            if rules.color.secondary:
-                for c in rules.color.secondary:
-                    add_rule(f"辅助色可使用{c.value}({c.name})", color_category)
-            # 禁用色
-            if rules.color.forbidden:
-                for c in rules.color.forbidden:
-                    reason = f"，原因：{c.reason}" if c.reason else ""
-                    add_rule(f"禁止使用颜色{c.value}{reason}", color_category)
-            # 整体描述
-            if rules.color.description:
-                add_rule(rules.color.description, color_category)
+        checklist = []
+        for i, sr in enumerate(sorted_rules, start=1):
+            if not sr.content or not sr.content.strip():
+                continue
+            entry = {
+                "rule_id": f"Rule_{i}",
+                "content": sr.content.strip(),
+                "category": sr.category,
+                "reference": f"参考文档-{source_prefix}",
+            }
+            if sr.rule_source_id:
+                entry["rule_source_id"] = sr.rule_source_id
+            if sr.fail_condition:
+                entry["fail_condition"] = sr.fail_condition
+            if sr.review_condition:
+                entry["review_condition"] = sr.review_condition
+            if sr.pass_condition:
+                entry["pass_condition"] = sr.pass_condition
+            if sr.output_level and not sr.fail_condition:
+                entry["output_level"] = sr.output_level
+            if sr.threshold and not sr.fail_condition:
+                entry["threshold"] = sr.threshold
+            checklist.append(entry)
 
-        # 3. 字体规范
-        if rules.font:
-            font_category = "字体规范"
-            # additional_rules
-            for rule in rules.font.additional_rules:
-                add_rule(rule, font_category)
-            # 允许字体
-            if rules.font.allowed:
-                add_rule(f"推荐使用字体：{','.join(rules.font.allowed)}", font_category)
-            # 禁用字体
-            if rules.font.forbidden:
-                add_rule(f"禁止使用字体：{','.join(rules.font.forbidden)}", font_category)
-            # 备注
-            if rules.font.note:
-                add_rule(rules.font.note, font_category)
-
-        # 4. 文案规范
-        if rules.copywriting:
-            cw_category = "文案规范"
-            if rules.copywriting.forbidden_words:
-                words = "、".join(w.word for w in rules.copywriting.forbidden_words)
-                add_rule(f"禁止使用词语：{words}", cw_category)
-            if rules.copywriting.required_content:
-                for content in rules.copywriting.required_content:
-                    add_rule(f"文案必须包含：{content}", cw_category)
-
-        # 5. 布局规范
-        if rules.layout:
-            layout_category = "布局规范"
-            if rules.layout.margin_min:
-                add_rule(f"最小边距应为{rules.layout.margin_min}px", layout_category)
-            if rules.layout.description:
-                add_rule(rules.layout.description, layout_category)
-
-        # 6. 次要规范（排版、风格、高风险标签等）
-        for sr in rules.secondary_rules:
-            add_rule(
-                sr.content,
-                sr.category,
-                rule_source_id=sr.rule_source_id,
-                fail_condition=sr.fail_condition,
-                review_condition=sr.review_condition,
-                pass_condition=sr.pass_condition,
-                output_level=sr.output_level,
-                threshold=sr.threshold,
-                feedback_text=sr.feedback_text,
-            )
-
-        # 7. 根据前置条件过滤 + 注入上下文
+        # 根据前置条件过滤 + 注入上下文
         if preconditions:
             checklist = self._apply_preconditions(checklist, preconditions)
 
@@ -406,6 +310,7 @@ class RulesContextManager:
         brand_status = preconditions.get("brand_status", "normal")
         joint_brand  = preconditions.get("joint_brand", "none")
         collab_lead  = preconditions.get("collab_lead")
+        department   = preconditions.get("department")
         comm_type    = preconditions.get("comm_type", "")
         material_type = preconditions.get("material_type", "")
         channels     = preconditions.get("channels", [])
@@ -438,6 +343,8 @@ class RulesContextManager:
             ctx_parts.append(f"物料类型={material_type}")
         if channels:
             ctx_parts.append(f"使用渠道={'、'.join(channels)}")
+        if joint_brand == "internal" and department:
+            ctx_parts.append(f"归属部门={department}")
         if joint_brand != "none" and collab_lead:
             ctx_parts.append(f"合作主导关系={'讯飞主导' if collab_lead == 'xunfei' else '对方主导'}")
         if notes:
