@@ -399,6 +399,10 @@ def list_history(
                 "input_meta": t.input_meta,
                 "formatted_report": t.formatted_report,
                 "results": t.results,
+                "review_result": t.review_result,
+                "review_comment": t.review_comment,
+                "review_at": t.review_at,
+                "per_image_reviews": t.per_image_reviews or [],
             }
             for t in tasks
         ],

@@ -38,10 +38,11 @@ class AuditTask(SQLModel, table=True):
     formatted_report: Optional[dict] = Field(default=None, sa_column=Column(JSON))  # 格式化后的报告（机器结果摘要）
     duration_seconds: Optional[int] = None  # 耗时（秒）
     machine_result: Optional[str] = Field(default=None, index=True)  # 机审结果：passed/failed/manual_review
-    review_result: Optional[str] = None  # 人工复核结果：passed/failed
+    review_result: Optional[str] = None  # 人工复核结果：passed/failed（整体）
     reviewer_id: Optional[str] = None  # 复核人 ID
-    review_comment: Optional[str] = None  # 复核意见
+    review_comment: Optional[str] = None  # 复核意见（整体）
     review_at: Optional[datetime] = None  # 复核时间
+    per_image_reviews: Optional[list[dict]] = Field(default=None, sa_column=Column(JSON))  # 每张图片的复核结果 [{"image_index": 0, "result": "passed", "comment": "..."}]
     error: Optional[str]            = None
     created_at: datetime            = Field(default_factory=datetime.now)
     updated_at: datetime            = Field(default_factory=datetime.now)

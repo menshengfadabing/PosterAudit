@@ -77,6 +77,65 @@ def get_review_task(task_id: str, session: Session = Depends(get_session)):
         "review_result": task.review_result,
         "review_comment": task.review_comment,
         "review_at": task.review_at,
+        "per_image_reviews": task.per_image_reviews or [],
+    }
+
+
+@router.post("/review/tasks/{task_id}/image-decision")
+def submit_image_review_decision(
+    task_id: str,
+    image_index: int = Query(..., ge=0, description="图片索引（0起始）"),
+    decision: str = Query(..., description="复核结果：passed/failed"),
+    comment: Optional[str] = Query(None, description="复核意见"),
+    session: Session = Depends(get_session),
+):
+    """提交单张图片的复核结果。所有图片复核完毕后自动生成整体结论。"""
+    task = session.get(AuditTask, task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+    if task.status != "pending_review":
+        raise HTTPException(400, detail="当前任务状态不支持提交复核结果")
+    if decision not in ("passed", "failed"):
+        raise HTTPException(400, detail="decision 必须是 passed 或 failed")
+
+    total_images = len((task.input_meta or {}).get("filenames", []))
+    if total_images > 0 and image_index >= total_images:
+        raise HTTPException(400, detail="图片索引超出范围")
+
+    # 更新 per_image_reviews
+    reviews: list[dict] = list(task.per_image_reviews or [])
+    existing = next((r for r in reviews if r.get("image_index") == image_index), None)
+    if existing:
+        existing["result"] = decision
+        existing["comment"] = comment or ""
+    else:
+        reviews.append({"image_index": image_index, "result": decision, "comment": comment or ""})
+    task.per_image_reviews = reviews
+
+    # 如果所有图片都已复核，自动提交整体结论（最差原则：有 failed → failed，否则 passed）
+    reviewed_indices = {r["image_index"] for r in reviews}
+    all_done = total_images > 0 and reviewed_indices == set(range(total_images))
+    if all_done:
+        overall = "failed" if any(r["result"] == "failed" for r in reviews) else "passed"
+        task.review_result = overall
+        task.review_comment = "; ".join(
+            f"图片{r['image_index']+1}: {r['comment']}" for r in sorted(reviews, key=lambda x: x["image_index"]) if r.get("comment")
+        ) or None
+        task.review_at = datetime.now()
+        task.status = "completed"
+        task.updated_at = datetime.now()
+
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+
+    return {
+        "task_id": task_id,
+        "image_index": image_index,
+        "result": decision,
+        "all_done": all_done,
+        "review_result": task.review_result,
+        "per_image_reviews": task.per_image_reviews,
     }
 
 
