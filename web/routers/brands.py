@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from src.services.document_parser import document_parser
@@ -303,3 +304,36 @@ def delete_reference_image(
     ok = rules_context.delete_reference_image(brand_id, filename)
     if not ok and db_img is None:
         raise HTTPException(404, detail="参考图片不存在")
+
+
+@router.get("/brands/{brand_id}/images")
+def list_reference_images(brand_id: str, session: Session = Depends(get_session)):
+    """获取品牌参考图片列表"""
+    brand = session.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, detail="品牌不存在")
+    images = session.exec(
+        select(ReferenceImage).where(ReferenceImage.brand_id == brand_id)
+    ).all()
+    return {
+        "brand_id": brand_id,
+        "items": [
+            {
+                "filename": img.filename,
+                "image_type": img.image_type,
+                "description": img.description,
+                "file_size": img.file_size,
+                "created_at": img.created_at,
+            }
+            for img in images
+        ],
+    }
+
+
+@router.get("/brands/{brand_id}/images/{filename}")
+def get_reference_image_file(brand_id: str, filename: str):
+    """获取品牌参考图片文件（用于前端展示）"""
+    image_path = IMAGES_BASE / brand_id / "images" / filename
+    if not image_path.exists():
+        raise HTTPException(404, detail="图片不存在")
+    return FileResponse(str(image_path))

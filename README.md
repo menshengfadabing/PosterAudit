@@ -283,7 +283,7 @@ createdb brand_audit   # 或使用已有数据库
 echo "DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/brand_audit" >> .env
 
 # 3. 启动 API 服务（终端 1）
-uv run uvicorn web.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn web.main:app --host 0.0.0.0 --port 8080
 
 # 4. 启动 Streamlit 前端（终端 2）
 uv run streamlit run frontend/app.py --server.port 8501

@@ -6,8 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlmodel import Session, select, desc
 
 from src.services.audit_service import audit_service
@@ -191,18 +190,24 @@ async def _run_audit(
 
 
 def _generate_formatted_report(results: list) -> dict:
-    """生成格式化后的审核报告，包含 rule_checks / issues / summary 供前端直接渲染"""
+    """生成格式化后的审核报告。
+    - per_image: 每张图片独立的审核结果列表
+    - rule_checks / violations / passed_rules: 跨图最差原则汇总（兼容旧逻辑）
+    """
     if not results:
-        return {"rule_checks": [], "violations": [], "passed_rules": [], "issues": [], "summary": ""}
+        return {"per_image": [], "rule_checks": [], "violations": [], "passed_rules": [], "issues": [], "summary": ""}
 
-    all_rule_checks = []
-    violations = []
-    passed_rules = set()
+    STATUS_ORDER = {"fail": 0, "review": 1, "warning": 1, "pass": 2}
+
+    per_image = []
     all_issues = []
     summaries = []
+    # 跨图最差合并
+    merged: dict[str, dict] = {}
 
     for result in results:
         report = result.get("report", {})
+        file_name = result.get("file_name", "")
         rule_checks = report.get("rule_checks", [])
         issues = report.get("issues", [])
         summary = report.get("summary", "")
@@ -210,44 +215,85 @@ def _generate_formatted_report(results: list) -> dict:
         if summary:
             summaries.append(summary)
 
-        # 收集问题列表
+        img_issues = []
         for issue in issues:
             if isinstance(issue, dict):
-                all_issues.append({
+                entry = {
                     "title": issue.get("type", ""),
                     "description": issue.get("description", issue.get("detail", "")),
-                })
+                }
+                img_issues.append(entry)
+                all_issues.append(entry)
 
-        # 收集规则检查明细
+        img_rule_checks = []
+        img_violations = []
+        img_passed = []
         for rc in rule_checks:
             rule_id = rc.get("rule_id", "")
-            rule_content = rc.get("rule_content", "")
             status = rc.get("status", "").lower()
-            confidence = rc.get("confidence", 0.0)
-            detail = rc.get("detail", "")
-            reference = rc.get("reference", "")
-
-            all_rule_checks.append({
+            entry = {
                 "rule_id": rule_id,
-                "rule_content": rule_content,
+                "rule_content": rc.get("rule_content", ""),
                 "status": status,
-                "confidence": confidence,
-                "detail": detail,
-                "reference": reference,
-            })
-
-            if status in ("fail",):
-                violations.append({
+                "confidence": rc.get("confidence", 0.0),
+                "detail": rc.get("detail", ""),
+                "reference": rc.get("reference", ""),
+            }
+            img_rule_checks.append(entry)
+            if status == "fail":
+                img_violations.append({
                     "id": rule_id,
                     "type": "hard",
-                    "rule": rule_content,
-                    "description": detail,
-                    "severity": "high" if confidence > 0.8 else "medium",
+                    "rule": rc.get("rule_content", ""),
+                    "description": rc.get("detail", ""),
+                    "severity": "high" if rc.get("confidence", 0.0) > 0.8 else "medium",
                 })
-            elif status in ("pass",):
-                passed_rules.add(rule_content)
+            elif status == "pass":
+                img_passed.append(rc.get("rule_content", ""))
+
+            # 跨图最差合并
+            if rule_id:
+                existing = merged.get(rule_id)
+                if existing is None:
+                    merged[rule_id] = dict(entry)
+                else:
+                    if STATUS_ORDER.get(status, 2) < STATUS_ORDER.get(existing["status"], 2):
+                        merged[rule_id].update({"status": status, "confidence": entry["confidence"], "detail": entry["detail"]})
+
+        # 单图状态
+        img_statuses = [rc.get("status", "").lower() for rc in rule_checks]
+        if any(s == "fail" for s in img_statuses):
+            img_status = "failed"
+        elif any(s in ("review", "warning") for s in img_statuses):
+            img_status = "manual_review"
+        elif img_statuses and all(s == "pass" for s in img_statuses):
+            img_status = "passed"
+        else:
+            img_status = "manual_review"
+
+        per_image.append({
+            "file_name": file_name,
+            "status": img_status,
+            "rule_checks": img_rule_checks,
+            "violations": img_violations,
+            "passed_rules": img_passed,
+            "issues": img_issues,
+            "summary": summary,
+        })
+
+    # 跨图汇总
+    all_rule_checks = list(merged.values())
+    violations = []
+    passed_rules = set()
+    for rc in all_rule_checks:
+        if rc["status"] == "fail":
+            violations.append({"id": rc["rule_id"], "type": "hard", "rule": rc["rule_content"],
+                                "description": rc["detail"], "severity": "high" if rc["confidence"] > 0.8 else "medium"})
+        elif rc["status"] == "pass":
+            passed_rules.add(rc["rule_content"])
 
     return {
+        "per_image": per_image,
         "rule_checks": all_rule_checks,
         "violations": violations,
         "passed_rules": list(passed_rules),
@@ -257,15 +303,18 @@ def _generate_formatted_report(results: list) -> dict:
 
 
 def _determine_machine_result(formatted_report: dict) -> str:
-    """根据规则检查结果确定机审结论：fail → failed，review → manual_review，否则 passed"""
+    """根据规则检查结果确定机审结论：最差结果为fail→failed，review→manual_review，全pass→passed"""
     rule_checks = formatted_report.get("rule_checks", [])
-    has_fail = any(rc.get("status") in ("fail",) for rc in rule_checks)
-    has_review = any(rc.get("status") in ("review", "warning") for rc in rule_checks)
-    if has_fail:
-        return "failed"
-    if has_review:
+    if not rule_checks:
         return "manual_review"
-    return "passed"
+    statuses = [rc.get("status", "").lower() for rc in rule_checks]
+    if any(s == "fail" for s in statuses):
+        return "failed"
+    if any(s in ("review", "warning") for s in statuses):
+        return "manual_review"
+    if all(s == "pass" for s in statuses):
+        return "passed"
+    return "manual_review"
 
 
 # ── 任务查询 ──────────────────────────────────────────────────────────────────
@@ -308,6 +357,15 @@ def delete_task(task_id: str, session: Session = Depends(get_session)):
     session.commit()
 
 
+@router.get("/tasks/{task_id}/images/{filename}")
+def get_task_image(task_id: str, filename: str):
+    """获取审核任务上传的海报图片（用于前端缩略图展示）"""
+    image_path = UPLOAD_DIR / task_id / filename
+    if not image_path.exists():
+        raise HTTPException(404, detail="图片不存在")
+    return FileResponse(str(image_path))
+
+
 
 
 @router.get("/history")
@@ -338,6 +396,7 @@ def list_history(
                 "created_at": t.created_at,
                 "duration": t.duration_seconds,
                 "status": t.status,
+                "input_meta": t.input_meta,
                 "formatted_report": t.formatted_report,
                 "results": t.results,
             }
