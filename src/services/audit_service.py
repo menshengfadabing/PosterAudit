@@ -318,6 +318,21 @@ class AuditService:
             api_keys = [settings.openai_api_key] if settings.openai_api_key else []
         key_count = len(api_keys) if api_keys else 1
 
+        # ── 同系列物料合并审核策略 ──────────────────────────────────────────
+        # 当前置条件中 is_same_series_material=yes 时：
+        #   1. 必须采用合并审核，不再采用默认的多 Key 轮询 + 动态批次大小
+        #   2. 单批次最小 2 张，最大 5 张（避免上下文窗口溢出）
+        #   3. 固定使用单个 API Key，禁用多 Key 轮询
+        is_same_series = (preconditions or {}).get("is_same_series_material") == "yes"
+        if is_same_series:
+            # 单批次 2~5 张，超出则分多批但每批不超过 5 张
+            max_images_per_request = min(max(2, total), 5)
+            # 只使用第一个 API Key，禁用多 Key 轮询
+            if api_keys and len(api_keys) > 1:
+                api_keys = [api_keys[0]]
+                key_count = 1
+            logger.info(f"同系列物料合并审核: {total} 张，每批最多 5 张，共 {max(1, (total + max_images_per_request - 1) // max_images_per_request)} 批，使用单个 API Key")
+
         # 动态计算最优批次大小
         # 目标：最小化总审核时间
         # 关键因素：每轮的最大批次大小（各Key并行时的最长批次）

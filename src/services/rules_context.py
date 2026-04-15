@@ -302,6 +302,7 @@ class RulesContextManager:
           brand_status=none         → 豁免全部 Logo 规则
           joint_brand=none          → 豁免联合标识相关规则（H-LOGO-08、H-LOGO-10）
           collab_lead=partner       → 豁免 Logo 位置（左上角）、尺寸下限
+          is_same_series_material=no → 豁免 Rule_16（同系列物料视觉语言稳定性规则）
 
         上下文注入：
           将关键前置条件以 [前置条件] 标签追加到相关规则的 content，
@@ -315,6 +316,7 @@ class RulesContextManager:
         material_type = preconditions.get("material_type", "")
         channels     = preconditions.get("channels", [])
         notes        = preconditions.get("notes", "")
+        is_same_series = preconditions.get("is_same_series_material", "")
 
         # ── 计算豁免的 rule_source_id 集合 ──────────────────────────────────
         exempt_ids: set[str] = set()
@@ -355,6 +357,7 @@ class RulesContextManager:
         filtered = []
         for rule in checklist:
             src_id = rule.get("rule_source_id", "")
+            content = rule.get("content", "")
 
             # 1. 豁免：直接跳过
             if src_id in exempt_ids:
@@ -367,7 +370,17 @@ class RulesContextManager:
                 logger.debug(f"豁免Logo规则（无src_id）: {rule.get('rule_id')}")
                 continue
 
-            # 3. 注入上下文到受上下文影响的规则
+            # 3. is_same_series_material=no → 豁免同系列视觉语言稳定性规则（Rule_16）
+            #    通过内容关键词匹配：包含"同一系列"/"系列物料"/"视觉语言"/"核心视觉"等
+            if is_same_series == "no":
+                visual_stability_keywords = ["同一系列", "系列物料", "视觉语言", "核心视觉",
+                               "视觉语法", "视觉一致性", "系列内", "多张物料"]
+                if any(kw in content for kw in visual_stability_keywords):
+                    logger.debug(f"豁免同系列视觉稳定性规则（is_same_series_material=no）: "
+                                 f"{rule.get('rule_id')} - {content[:50]}...")
+                    continue
+
+            # 4. 注入上下文到受上下文影响的规则
             if context_tag:
                 # 对联合标识主次规则（H-LOGO-10）注入合作主导关系，对调性规则注入传播类型
                 if src_id in ("H-LOGO-10",) or "调性" in rule.get("category", "") or "场景" in rule.get("category", ""):

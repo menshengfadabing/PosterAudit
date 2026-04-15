@@ -13,7 +13,7 @@ from src.services.audit_service import audit_service
 from src.services.rules_context import rules_context
 from src.utils.config import get_app_dir
 from web.deps import get_session, verify_api_key
-from web.models.db import AuditTask, Brand
+from web.models.db import AuditTask, Brand, User
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
@@ -31,6 +31,7 @@ async def submit_audit(
     batch_size: Optional[int] = Form(None, description="每批图片数，默认 auto"),
     compression: str = Form("balanced", description="压缩预设：high_quality/balanced/high_compression/no_compression"),
     preconditions: Optional[str] = Form(None, description="前置条件 JSON 字符串"),
+    same_series_material: Optional[str] = Form(None, description="是否为同一系列物料：yes/no"),
     image_purpose: Optional[str] = Form(None, description="图片用途"),
     project_type: Optional[str] = Form(None, description="项目类型"),
     project_desc: Optional[str] = Form(None, description="项目描述"),
@@ -41,6 +42,7 @@ async def submit_audit(
 
     - `mode=async`：立即返回 task_id，客户端通过 GET /tasks/{task_id} 轮询结果
     - `mode=sync`：等待审核完成后直接返回结果（适合单张小图快速测试）
+    - `same_series_material=yes`：启用合并审核策略，每批次至少 2 张，禁用多 Key 轮询
     """
     import json as _json
 
@@ -55,6 +57,10 @@ async def submit_audit(
             preconditions_dict = _json.loads(preconditions)
         except Exception:
             raise HTTPException(400, detail="preconditions 格式错误，需要合法的 JSON 字符串")
+
+    # 将 same_series_material 注入到前置条件中（供后端策略使用）
+    if same_series_material and preconditions_dict is not None:
+        preconditions_dict["is_same_series_material"] = same_series_material
 
     # 保存上传文件到临时目录
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,6 +81,7 @@ async def submit_audit(
         "compression": compression,
         "filenames": [p.split("/")[-1] for p in image_paths],
         "preconditions": preconditions_dict,
+        "same_series_material": same_series_material,
     }
 
     # 取第一个文件名作为素材名称
@@ -344,6 +351,16 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
         resp["formatted_report"] = task.formatted_report
         resp["duration_seconds"] = task.duration_seconds
         resp["machine_result"] = task.machine_result
+
+    # 返回复核员信息
+    reviewer_ids = task.reviewer_ids or []
+    reviewer_name_map: dict[str, str] = {}
+    if reviewer_ids:
+        for u in session.exec(select(User).where(User.id.in_(reviewer_ids))).all():
+            reviewer_name_map[u.id] = u.name
+    resp["reviewer_ids"] = reviewer_ids
+    resp["reviewers"] = [{"user_id": uid, "name": reviewer_name_map.get(uid, uid)} for uid in reviewer_ids]
+
     return resp
 
 
@@ -383,6 +400,15 @@ def list_history(
     total = len(session.exec(query).all())
     tasks = session.exec(query.offset((page - 1) * page_size).limit(page_size)).all()
 
+    # 批量查询复核员名称
+    all_reviewer_ids: set[str] = set()
+    for t in tasks:
+        all_reviewer_ids.update(t.reviewer_ids or [])
+    reviewer_name_map: dict[str, str] = {}
+    if all_reviewer_ids:
+        for u in session.exec(select(User).where(User.id.in_(list(all_reviewer_ids)))).all():
+            reviewer_name_map[u.id] = u.name
+
     return {
         "total": total,
         "page": page,
@@ -403,6 +429,8 @@ def list_history(
                 "review_comment": t.review_comment,
                 "review_at": t.review_at,
                 "per_image_reviews": t.per_image_reviews or [],
+                "reviewer_ids": t.reviewer_ids or [],
+                "reviewers": [{"user_id": uid, "name": reviewer_name_map.get(uid, uid)} for uid in (t.reviewer_ids or [])],
             }
             for t in tasks
         ],

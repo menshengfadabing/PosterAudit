@@ -40,6 +40,7 @@ class AuditTask(SQLModel, table=True):
     machine_result: Optional[str] = Field(default=None, index=True)  # 机审结果：passed/failed/manual_review
     review_result: Optional[str] = None  # 人工复核结果：passed/failed（整体）
     reviewer_id: Optional[str] = None  # 复核人 ID
+    reviewer_ids: Optional[list[str]] = Field(default=None, sa_column=Column(JSON))  # 当日复核人 ID 列表（关联排班）
     review_comment: Optional[str] = None  # 复核意见（整体）
     review_at: Optional[datetime] = None  # 复核时间
     per_image_reviews: Optional[list[dict]] = Field(default=None, sa_column=Column(JSON))  # 每张图片的复核结果 [{"image_index": 0, "result": "passed", "comment": "..."}]

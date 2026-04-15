@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select, desc
 
 from web.deps import get_session, verify_api_key
-from web.models.db import AuditTask, User
+from web.models.db import AuditTask, Schedule, User
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
@@ -125,6 +125,12 @@ def submit_image_review_decision(
         task.status = "completed"
         task.updated_at = datetime.now()
 
+        # 关联当日排班：查找今日的 Schedule，写入 reviewer_ids
+        today = datetime.now().strftime("%Y-%m-%d")
+        schedule = session.exec(select(Schedule).where(Schedule.date == today)).first()
+        if schedule and schedule.reviewer_ids:
+            task.reviewer_ids = schedule.reviewer_ids
+
     session.add(task)
     session.commit()
     session.refresh(task)
@@ -195,6 +201,13 @@ def submit_review_decision(
     task.status = "completed"
     task.machine_result = decision  # 更新机审结果为复核结果
     task.updated_at = datetime.now()
+
+    # 关联当日排班：查找今日的 Schedule，写入 reviewer_ids
+    today = datetime.now().strftime("%Y-%m-%d")
+    schedule = session.exec(select(Schedule).where(Schedule.date == today)).first()
+    if schedule and schedule.reviewer_ids:
+        task.reviewer_ids = schedule.reviewer_ids
+
     session.add(task)
     session.commit()
     session.refresh(task)
