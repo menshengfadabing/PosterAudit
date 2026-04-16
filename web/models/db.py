@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -59,7 +59,8 @@ class ReferenceImage(SQLModel, table=True):
     filename: str
     image_type: str    = Field(default="logo")
     description: str   = Field(default="")
-    file_path: str
+    mime_type: str     = Field(default="image/png")
+    image_base64: Optional[str] = Field(default=None, sa_column=Column(Text))
     file_size: int     = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now)
 

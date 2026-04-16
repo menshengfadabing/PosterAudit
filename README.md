@@ -17,6 +17,7 @@
 - `src/`：核心业务服务与配置
   - `src/services/`：规则解析、审核编排、LLM 调用
   - `src/utils/config.py`：统一配置（含 LLM/MLLM、鉴权、隔离、Redis/Celery）
+- `scripts/`：服务启停脚本（`backendctl.sh`）
 - `test/perf/`：性能测试脚本（Locust + pytest）
 - `docs/`：升级方案与性能测试文档
 
@@ -48,42 +49,56 @@
   - `JAVA_USERINFO_URL`
   - `ENABLE_USER_ISOLATION`
 
-## 5. 本地启动
+## 5. 快速启动（推荐）
 ### 5.1 安装依赖
 ```bash
 uv sync
 ```
 
-### 5.2 启动 API
+### 5.2 一键启动后端（API + Celery）
 ```bash
-uv run uvicorn web.main:app --host 0.0.0.0 --port 8080 --reload
+./scripts/backendctl.sh up
 ```
 
-### 5.3 启动 Celery Worker（异步模式）
+### 5.3 查看状态/日志/停止
 ```bash
+./scripts/backendctl.sh status
+./scripts/backendctl.sh logs api
+./scripts/backendctl.sh logs celery 1
+./scripts/backendctl.sh down
+```
+
+### 5.4 可选参数
+```bash
+CELERY_WORKERS=3 CELERY_CONCURRENCY=8 API_PORT=8080 ./scripts/backendctl.sh up
+```
+
+## 6. 手动启动（备选）
+```bash
+uv run uvicorn web.main:app --host 0.0.0.0 --port 8080 --reload
 uv run celery -A celery_app.celery worker -Q audit -l info --concurrency=8 -n audit1@%h
 ```
 
-### 5.4 健康检查
+健康检查：
 ```bash
 curl http://localhost:8080/health
 ```
 
-## 6. 常用接口（`/api/v1`）
+## 7. 常用接口（`/api/v1`）
 - 品牌：`/brands`、`/brands/{id}`、`/brands/{id}/checklist`
 - 审核：`POST /audit`、`GET /tasks/{task_id}`、`GET /history`
 - 复核：`/review/tasks`、`/review/tasks/{task_id}`
 - 统计：`/queue/status`、`/history/stats`、`/reviewers`
 
-## 7. 联调说明
+## 8. 联调说明
 前端仓库 `design-portal-front` 通过 `/audit-api` 代理到本服务（默认 `http://localhost:8080`）。
 
-## 8. 性能测试
+## 9. 性能测试
 - 脚本：`test/perf/locustfile.py`、`test/perf/test_consistency.py`
 - 方案文档：`docs/系统性能测试.md`
 - 最新报告：`docs/性能测试报告.md`
 
-## 9. 排障建议
+## 10. 排障建议
 - 若任务长期 `pending/running`：优先检查 Celery worker 是否在线、任务名是否注册（`audit.run`）。
 - 若接口 403：检查当前用户身份头、管理员权限和 `ENABLE_USER_ISOLATION` 配置。
 - 若审核结果为空：优先检查 `MLLM_API_KEY_*` 是否正确加载（避免旧环境变量干扰）。

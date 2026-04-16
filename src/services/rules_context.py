@@ -16,7 +16,6 @@ from src.models.schemas import (
     FontRules,
     LayoutRules,
     LogoRules,
-    ReferenceImage,
     SecondaryRule,
 )
 from src.utils.config import settings, get_app_dir
@@ -450,79 +449,6 @@ class RulesContextManager:
 
     # ============== 参考图片管理 ==============
 
-    MAX_REFERENCE_IMAGES = 5  # 每个规范组最多5张参考图片
-
-    def add_reference_image(
-        self,
-        brand_id: str,
-        image_data: bytes,
-        filename: str,
-        description: str = "",
-        image_type: str = "logo",
-    ) -> ReferenceImage | None:
-        """
-        添加参考图片
-
-        Args:
-            brand_id: 品牌ID
-            image_data: 图片二进制数据
-            filename: 文件名
-            description: 图片描述
-            image_type: 图片类型 (logo/logo_variant/icon等)
-
-        Returns:
-            ReferenceImage 对象，失败返回 None
-        """
-        rules = self.get_rules(brand_id)
-        if rules is None:
-            logger.warning(f"品牌规范不存在: {brand_id}")
-            return None
-
-        # 检查数量限制
-        if len(rules.reference_images) >= self.MAX_REFERENCE_IMAGES:
-            logger.warning(f"参考图片数量已达上限: {self.MAX_REFERENCE_IMAGES}")
-            return None
-
-        # 确保图片目录存在
-        images_dir = self.rules_dir / brand_id / "images"
-        images_dir.mkdir(parents=True, exist_ok=True)
-
-        # 生成唯一文件名（避免冲突）
-        safe_filename = filename
-        if (images_dir / safe_filename).exists():
-            import time
-            name, ext = filename.rsplit(".", 1) if "." in filename else (filename, "")
-            safe_filename = f"{name}_{int(time.time())}.{ext}" if ext else f"{name}_{int(time.time())}"
-
-        # 保存图片文件
-        image_path = images_dir / safe_filename
-        with open(image_path, "wb") as f:
-            f.write(image_data)
-
-        # 创建 ReferenceImage 对象
-        ref_image = ReferenceImage(
-            filename=safe_filename,
-            description=description,
-            image_type=image_type,
-            file_size=len(image_data),
-            upload_time=datetime.now(),
-        )
-
-        # 添加到规则中
-        rules.reference_images.append(ref_image)
-        self._cache[brand_id] = rules
-        self._save_rules(brand_id, rules)
-
-        logger.info(f"添加参考图片: {brand_id}/{safe_filename}")
-        return ref_image
-
-    def get_reference_images(self, brand_id: str) -> list[ReferenceImage]:
-        """获取参考图片列表"""
-        rules = self.get_rules(brand_id)
-        if rules is None:
-            return []
-        return rules.reference_images
-
     def get_reference_images_data(self, brand_id: str) -> list[dict]:
         """
         获取参考图片数据（用于 LLM 调用）
@@ -531,6 +457,41 @@ class RulesContextManager:
             list[dict]: 每个元素包含 {"url": data_url, "format": str, "description": str}
         """
         import base64
+        from sqlmodel import Session, select
+
+        # 优先使用数据库中的 base64 存储（可迁移、无需本地文件）
+        try:
+            from web.deps import engine
+            from web.models.db import ReferenceImage as DBReferenceImage
+
+            with Session(engine) as session:
+                db_images = session.exec(
+                    select(DBReferenceImage).where(DBReferenceImage.brand_id == brand_id)
+                ).all()
+
+            if db_images:
+                images_data = []
+                for img in db_images:
+                    if not img.image_base64:
+                        continue
+                    mime_type = (img.mime_type or "image/png").strip()
+                    image_format = mime_type.split("/", 1)[-1].lower()
+                    if image_format == "jpg":
+                        image_format = "jpeg"
+                    if image_format not in ["png", "jpeg", "gif", "bmp", "webp"]:
+                        image_format = "png"
+                        mime_type = "image/png"
+                    data_url = f"data:{mime_type};base64,{img.image_base64}"
+                    images_data.append({
+                        "url": data_url,
+                        "format": image_format,
+                        "description": img.description or "",
+                        "image_type": img.image_type or "logo",
+                    })
+                if images_data:
+                    return images_data
+        except Exception as e:
+            logger.warning(f"从数据库读取参考图片失败，回退到文件模式: {e}")
 
         rules = self.get_rules(brand_id)
         if rules is None:
@@ -567,50 +528,6 @@ class RulesContextManager:
             })
 
         return images_data
-
-    def delete_reference_image(self, brand_id: str, filename: str) -> bool:
-        """删除参考图片"""
-        rules = self.get_rules(brand_id)
-        if rules is None:
-            return False
-
-        # 从列表中移除
-        original_count = len(rules.reference_images)
-        rules.reference_images = [
-            img for img in rules.reference_images if img.filename != filename
-        ]
-
-        if len(rules.reference_images) == original_count:
-            logger.warning(f"参考图片不存在: {brand_id}/{filename}")
-            return False
-
-        # 删除文件
-        image_path = self.rules_dir / brand_id / "images" / filename
-        if image_path.exists():
-            image_path.unlink()
-
-        # 更新缓存和持久化
-        self._cache[brand_id] = rules
-        self._save_rules(brand_id, rules)
-
-        logger.info(f"删除参考图片: {brand_id}/{filename}")
-        return True
-
-    def update_reference_image_description(self, brand_id: str, filename: str, description: str) -> bool:
-        """更新参考图片描述"""
-        rules = self.get_rules(brand_id)
-        if rules is None:
-            return False
-
-        for img in rules.reference_images:
-            if img.filename == filename:
-                img.description = description
-                self._cache[brand_id] = rules
-                self._save_rules(brand_id, rules)
-                logger.info(f"更新参考图片描述: {brand_id}/{filename}")
-                return True
-
-        return False
 
     def reparse_rules_from_raw_text(self, brand_id: str) -> Optional[BrandRules]:
         """从 raw_text 重新解析规则（用于升级现有规则以提取结构化字段）"""

@@ -10,6 +10,7 @@ API_HOST="${API_HOST:-0.0.0.0}"
 API_PORT="${API_PORT:-8080}"
 CELERY_WORKERS="${CELERY_WORKERS:-3}"
 CELERY_CONCURRENCY="${CELERY_CONCURRENCY:-8}"
+API_RELOAD="${API_RELOAD:-false}"
 
 cd "${ROOT_DIR}"
 
@@ -32,6 +33,7 @@ read_pid() {
 
 start_api() {
   local pid
+  local api_args
   pid="$(read_pid "${API_PID_FILE}")"
   if is_pid_alive "${pid}"; then
     echo "[api] already running (pid=${pid})"
@@ -39,8 +41,12 @@ start_api() {
   fi
 
   echo "[api] starting on ${API_HOST}:${API_PORT} ..."
+  api_args=(--host "${API_HOST}" --port "${API_PORT}")
+  if [[ "${API_RELOAD}" == "true" ]]; then
+    api_args+=(--reload)
+  fi
   nohup env USE_CELERY=true PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}" uv run uvicorn web.main:app \
-    --host "${API_HOST}" --port "${API_PORT}" --reload \
+    "${api_args[@]}" \
     > "${LOG_DIR}/api.log" 2>&1 &
   echo $! > "${API_PID_FILE}"
   sleep 1
@@ -186,11 +192,13 @@ usage: $0 {up|down|restart|status|logs}
 env override:
   API_HOST=0.0.0.0
   API_PORT=8080
+  API_RELOAD=false
   CELERY_WORKERS=3
   CELERY_CONCURRENCY=8
 
 examples:
   $0 up
+  API_RELOAD=true $0 up
   CELERY_WORKERS=2 CELERY_CONCURRENCY=4 $0 up
   $0 status
   $0 logs api

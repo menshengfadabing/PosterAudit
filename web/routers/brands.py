@@ -1,25 +1,22 @@
 """品牌规则 + 参考图片路由（6个接口）"""
 
-import shutil
+import base64
+import mimetypes
 import uuid
-from pathlib import Path
-from typing import Annotated, Optional
+from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from src.services.document_parser import document_parser
 from src.services.rules_context import rules_context
-from src.utils.config import get_app_dir
 from web.auth import require_admin
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Brand, ReferenceImage
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
-
-IMAGES_BASE = get_app_dir() / "data" / "rules"
-
 
 # ── 品牌规则 ──────────────────────────────────────────────────────────────────
 
@@ -162,7 +159,6 @@ async def update_brand(
     if brand_name:
         brand.name = brand_name
 
-    from datetime import datetime
     brand.updated_at = datetime.now()
     session.add(brand)
     session.commit()
@@ -187,7 +183,6 @@ def update_brand_status(
         raise HTTPException(400, detail=f"status 必须是 {allowed} 之一")
 
     brand.status = status
-    from datetime import datetime
     brand.updated_at = datetime.now()
     session.add(brand)
     session.commit()
@@ -255,31 +250,47 @@ async def upload_reference_images(
     if not brand:
         raise HTTPException(404, detail="品牌不存在")
 
+    existing_count = session.exec(
+        select(ReferenceImage).where(ReferenceImage.brand_id == brand_id)
+    ).all()
+    max_reference_images = 5
+    if len(existing_count) >= max_reference_images:
+        raise HTTPException(400, detail=f"参考图片数量已达上限: {max_reference_images}")
+
     added = []
     for file in files:
         content = await file.read()
-        ref = rules_context.add_reference_image(
-            brand_id=brand_id,
-            image_data=content,
-            filename=file.filename or f"{uuid.uuid4().hex}.png",
-            description=description,
-            image_type=image_type,
-        )
-        if ref is None:
+        if not content:
             continue
 
-        # 同步写入数据库
-        images_dir = IMAGES_BASE / brand_id / "images"
+        if len(existing_count) + len(added) >= max_reference_images:
+            break
+
+        filename = file.filename or f"{uuid.uuid4().hex}.png"
+        duplicate = session.exec(
+            select(ReferenceImage).where(
+                ReferenceImage.brand_id == brand_id,
+                ReferenceImage.filename == filename,
+            )
+        ).first()
+        if duplicate:
+            name, dot, ext = filename.rpartition(".")
+            stem = name if dot else filename
+            suffix = f".{ext}" if dot else ""
+            filename = f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
+
+        mime_type = (file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream").strip()
         db_img = ReferenceImage(
             brand_id=brand_id,
-            filename=ref.filename,
-            image_type=ref.image_type,
-            description=ref.description,
-            file_path=str(images_dir / ref.filename),
-            file_size=ref.file_size,
+            filename=filename,
+            image_type=image_type,
+            description=description,
+            mime_type=mime_type,
+            image_base64=base64.b64encode(content).decode("ascii"),
+            file_size=len(content),
         )
         session.add(db_img)
-        added.append(ref.filename)
+        added.append(filename)
 
     session.commit()
     return {"brand_id": brand_id, "added": added}
@@ -301,9 +312,8 @@ def delete_reference_image(
     if db_img:
         session.delete(db_img)
         session.commit()
-
-    ok = rules_context.delete_reference_image(brand_id, filename)
-    if not ok and db_img is None:
+        return
+    if db_img is None:
         raise HTTPException(404, detail="参考图片不存在")
 
 
@@ -323,6 +333,7 @@ def list_reference_images(brand_id: str, session: Session = Depends(get_session)
                 "filename": img.filename,
                 "image_type": img.image_type,
                 "description": img.description,
+                "mime_type": img.mime_type,
                 "file_size": img.file_size,
                 "created_at": img.created_at,
             }
@@ -332,9 +343,22 @@ def list_reference_images(brand_id: str, session: Session = Depends(get_session)
 
 
 @router.get("/brands/{brand_id}/images/{filename}")
-def get_reference_image_file(brand_id: str, filename: str):
+def get_reference_image_file(brand_id: str, filename: str, session: Session = Depends(get_session)):
     """获取品牌参考图片文件（用于前端展示）"""
-    image_path = IMAGES_BASE / brand_id / "images" / filename
-    if not image_path.exists():
+    img = session.exec(
+        select(ReferenceImage).where(
+            ReferenceImage.brand_id == brand_id,
+            ReferenceImage.filename == filename,
+        )
+    ).first()
+    if not img or not img.image_base64:
         raise HTTPException(404, detail="图片不存在")
-    return FileResponse(str(image_path))
+    try:
+        content = base64.b64decode(img.image_base64)
+    except Exception as e:
+        raise HTTPException(500, detail=f"图片数据损坏: {e}") from e
+    return Response(
+        content=content,
+        media_type=img.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{img.filename}"'},
+    )
