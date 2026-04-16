@@ -41,16 +41,16 @@ def ensure_data_dirs():
 class Settings(BaseSettings):
     """应用配置"""
 
-    # 规则解析模型（纯文本）
-    deepseek_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
-    deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-v3-2-251201"
+    # 文本模型（规则解析）
+    llm_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
+    llm_api_key: str = ""
+    llm_model: str = "deepseek-v3-2-251201"
 
-    # 海报分析模型（多模态）
-    openai_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
-    openai_api_key: str = ""  # 单个 Key（兼容旧配置）
-    openai_api_keys: str = ""  # 多个 Key，逗号分隔（新配置，优先使用）
-    doubao_model: str = "doubao-seed-2-0-pro-260215"
+    # 多模态模型（海报审核）
+    mllm_api_base: str = "https://ark.cn-beijing.volces.com/api/v3"
+    mllm_api_key: str = ""  # 单个 Key
+    mllm_api_keys: str = ""  # 多个 Key，逗号分隔（优先）
+    mllm_model: str = "doubao-seed-2-0-pro-260215"
 
     # 应用配置
     brand_rules_path: str = ""
@@ -61,6 +61,22 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://postgres:postgres123456@localhost:5432/app"
     allowed_api_keys: str = ""   # 逗号分隔；为空时跳过鉴权（开发模式）
     upload_dir: str = ""
+
+    # 角色鉴权配置（回源 Java userInfo）
+    enable_java_auth: bool = False
+    java_userinfo_url: str = ""
+    java_token_header: str = "Token"
+    java_auth_timeout_seconds: float = 5.0
+
+    # 用户数据隔离（历史/任务仅展示本人数据）
+    enable_user_isolation: bool = True
+
+    use_celery: bool = False
+    redis_url: str = "redis://localhost:6379/0"
+    redis_result_url: str = "redis://localhost:6379/1"
+    redis_cache_url: str = "redis://localhost:6379/2"
+    celery_worker_concurrency: int = 70
+    task_status_ttl_seconds: int = 3600
 
     # 缓存配置
     cache_enabled: bool = True
@@ -85,28 +101,47 @@ class Settings(BaseSettings):
         if not self.data_dir:
             self.data_dir = str(app_dir / "data")
 
-    def get_openai_api_keys(self) -> list[str]:
-        """获取 OpenAI API Key 列表（支持多 Key）"""
+    def get_mllm_api_keys(self) -> list[str]:
+        """获取多模态 API Key 列表（支持多 Key）"""
         import os
 
-        # 优先级 1: OPENAI_API_KEYS 环境变量（逗号分隔）
-        if self.openai_api_keys:
-            keys = [k.strip() for k in self.openai_api_keys.split(",") if k.strip()]
+        # 优先级 1: MLLM_API_KEYS 环境变量（逗号分隔）
+        if self.mllm_api_keys:
+            keys = [k.strip() for k in self.mllm_api_keys.split(",") if k.strip()]
             if keys:
                 return keys
 
-        # 优先级 2: OPENAI_API_KEY_0, OPENAI_API_KEY_1, ... 格式
+        # 优先级 2: MLLM_API_KEY_0, MLLM_API_KEY_1, ... 格式
         indexed_keys = []
         for i in range(10):  # 支持最多 10 个 Key
-            key = os.getenv(f"OPENAI_API_KEY_{i}", "")
+            key = os.getenv(f"MLLM_API_KEY_{i}", "")
             if key and key.strip():
                 indexed_keys.append(key.strip())
         if indexed_keys:
             return indexed_keys
 
-        # 优先级 3: 单 Key 配置
-        if self.openai_api_key:
-            return [self.openai_api_key]
+        # 优先级 3: 从项目 .env 文件中读取索引 Key（兼容 Celery 直接启动场景）
+        env_path = get_app_dir() / ".env"
+        if env_path.exists():
+            file_keys: list[str] = []
+            try:
+                for line in env_path.read_text(encoding="utf-8").splitlines():
+                    row = line.strip()
+                    if not row or row.startswith("#") or "=" not in row:
+                        continue
+                    k, _, v = row.partition("=")
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k.startswith("MLLM_API_KEY_") and v:
+                        file_keys.append(v)
+                if file_keys:
+                    return file_keys
+            except Exception:
+                pass
+
+        # 优先级 4: 单 Key 配置
+        if self.mllm_api_key:
+            return [self.mllm_api_key]
 
         return []
 

@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from src.services.document_parser import document_parser
 from src.services.rules_context import rules_context
 from src.utils.config import get_app_dir
+from web.auth import require_admin
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Brand, ReferenceImage
 
@@ -22,7 +23,7 @@ IMAGES_BASE = get_app_dir() / "data" / "rules"
 
 # ── 品牌规则 ──────────────────────────────────────────────────────────────────
 
-@router.post("/brands", status_code=201)
+@router.post("/brands", status_code=201, dependencies=[Depends(require_admin)])
 async def create_brand(
     file: UploadFile = File(..., description="品牌规范文档（PDF/DOCX/XLSX/MD/TXT）"),
     brand_name: str = Form(...),
@@ -73,7 +74,7 @@ def list_brands(session: Session = Depends(get_session)):
     ]
 
 
-@router.post("/brands/merge", status_code=201)
+@router.post("/brands/merge", status_code=201, dependencies=[Depends(require_admin)])
 async def merge_brands(
     files: list[UploadFile] = File(..., description="多个规范文档，合并解析为一个品牌规范"),
     brand_name: str = Form(...),
@@ -134,7 +135,7 @@ def get_brand(brand_id: str, session: Session = Depends(get_session)):
     }
 
 
-@router.put("/brands/{brand_id}")
+@router.put("/brands/{brand_id}", dependencies=[Depends(require_admin)])
 async def update_brand(
     brand_id: str,
     action: str = Form("update", description="update=更新元信息；reparse=重新解析规则"),
@@ -170,7 +171,7 @@ async def update_brand(
     return {"brand_id": brand.id, "brand_name": brand.name, "action": action, "status": "ok"}
 
 
-@router.patch("/brands/{brand_id}/status")
+@router.patch("/brands/{brand_id}/status", dependencies=[Depends(require_admin)])
 def update_brand_status(
     brand_id: str,
     status: str = Form(..., description="品牌状态：active/inactive/archived"),
@@ -195,7 +196,7 @@ def update_brand_status(
     return {"brand_id": brand.id, "brand_name": brand.name, "status": brand.status}
 
 
-@router.delete("/brands/{brand_id}", status_code=204)
+@router.delete("/brands/{brand_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_brand(brand_id: str, session: Session = Depends(get_session)):
     """删除品牌规则"""
     brand = session.get(Brand, brand_id)
@@ -241,7 +242,7 @@ def get_brand_checklist(brand_id: str, session: Session = Depends(get_session)):
 
 # ── 参考图片 ──────────────────────────────────────────────────────────────────
 
-@router.post("/brands/{brand_id}/images", status_code=201)
+@router.post("/brands/{brand_id}/images", status_code=201, dependencies=[Depends(require_admin)])
 async def upload_reference_images(
     brand_id: str,
     files: list[UploadFile] = File(..., description="参考图片（Logo 标准件等），可批量上传"),
@@ -284,7 +285,7 @@ async def upload_reference_images(
     return {"brand_id": brand_id, "added": added}
 
 
-@router.delete("/brands/{brand_id}/images/{filename}", status_code=204)
+@router.delete("/brands/{brand_id}/images/{filename}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_reference_image(
     brand_id: str,
     filename: str,

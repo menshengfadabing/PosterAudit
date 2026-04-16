@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select, func, desc
 
+from web.auth import require_admin
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Brand, Schedule, User
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+router = APIRouter(dependencies=[Depends(verify_api_key), Depends(require_admin)])
 
 
 class ScheduleUpsert(BaseModel):

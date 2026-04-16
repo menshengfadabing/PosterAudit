@@ -364,8 +364,8 @@ class DocumentParser:
         logger.info(f"使用LLM提取品牌规范: {filename}")
 
         # 检查API配置
-        if not settings.deepseek_api_key:
-            logger.warning("未配置DeepSeek API Key，无法进行LLM提取")
+        if not settings.llm_api_key:
+            logger.warning("未配置文本模型 API Key，无法进行LLM提取")
             return BrandRules(
                 brand_id="",
                 brand_name="",
@@ -393,12 +393,12 @@ class DocumentParser:
 
         try:
             # 使用 DeepSeek 纯文本模型进行规则解析
-            logger.info(f"DeepSeek API配置: base={settings.deepseek_api_base}, model={settings.deepseek_model}")
+            logger.info(f"文本模型配置: base={settings.llm_api_base}, model={settings.llm_model}")
 
             llm = ChatOpenAI(
-                model=settings.deepseek_model,
-                base_url=settings.deepseek_api_base,
-                api_key=settings.deepseek_api_key,
+                model=settings.llm_model,
+                base_url=settings.llm_api_base,
+                api_key=settings.llm_api_key,
                 temperature=0,
                 timeout=300,  # 规则文档输出量大，需要更长超时
                 max_tokens=16384,  # 规则文档解析输出量大，必须显式设置
@@ -514,10 +514,10 @@ class DocumentParser:
         logger.info(f"使用LLM流式提取品牌规范: {filename}")
 
         # 检查API配置
-        if not settings.deepseek_api_key:
-            logger.warning("未配置DeepSeek API Key，无法进行LLM提取")
+        if not settings.llm_api_key:
+            logger.warning("未配置文本模型 API Key，无法进行LLM提取")
             if stream_callback:
-                stream_callback("[错误] 未配置DeepSeek API Key")
+                stream_callback("[错误] 未配置文本模型 API Key")
             return BrandRules(
                 brand_id="",
                 brand_name="",
@@ -545,12 +545,12 @@ class DocumentParser:
         full_content = ""
 
         try:
-            logger.info(f"DeepSeek API配置: base={settings.deepseek_api_base}, model={settings.deepseek_model}")
+            logger.info(f"文本模型配置: base={settings.llm_api_base}, model={settings.llm_model}")
 
             llm = ChatOpenAI(
-                model=settings.deepseek_model,
-                base_url=settings.deepseek_api_base,
-                api_key=settings.deepseek_api_key,
+                model=settings.llm_model,
+                base_url=settings.llm_api_base,
+                api_key=settings.llm_api_key,
                 temperature=0,
                 timeout=300,
                 max_tokens=16384,  # 规则文档解析输出量大，必须显式设置

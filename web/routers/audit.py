@@ -6,12 +6,14 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse, FileResponse
-from sqlmodel import Session, select, desc
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlmodel import Session, desc, func, select
 
 from src.services.audit_service import audit_service
 from src.services.rules_context import rules_context
-from src.utils.config import get_app_dir
+from src.utils.config import get_app_dir, settings
+from src.utils.redis_client import get_task_status, set_task_status
+from web.auth import Identity, get_current_identity
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Brand, User
 
@@ -19,6 +21,17 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 UPLOAD_DIR = get_app_dir() / "data" / "uploads"
 
+
+def _is_admin(identity: Identity) -> bool:
+    return identity.is_admin
+
+def _ensure_task_access(task: AuditTask, identity: Identity) -> None:
+    if _is_admin(identity) or not settings.enable_user_isolation:
+        return
+    if not identity.username:
+        raise HTTPException(403, detail="缺少用户身份，无法访问该任务")
+    if task.created_by and task.created_by != identity.username:
+        raise HTTPException(403, detail="无权限访问该任务")
 
 # ── 审核提交 ────────────────────────────────────────────────────��─────────────
 
@@ -35,6 +48,7 @@ async def submit_audit(
     image_purpose: Optional[str] = Form(None, description="图片用途"),
     project_type: Optional[str] = Form(None, description="项目类型"),
     project_desc: Optional[str] = Form(None, description="项目描述"),
+    identity: Identity = Depends(get_current_identity),
     session: Session = Depends(get_session),
 ):
     """
@@ -92,6 +106,7 @@ async def submit_audit(
         id=task_id,
         brand_id=brand_id,
         name=material_name,
+        created_by=identity.username,
         image_purpose=image_purpose,
         project_type=project_type,
         project_desc=project_desc,
@@ -108,9 +123,20 @@ async def submit_audit(
         session.refresh(task)
         return {"task_id": task_id, "status": task.status, "results": task.results}
 
-    # 异步模式：在后台任务中运行
+    # 异步模式：优先走 Celery（可配置开关），失败时回退 BackgroundTasks
+    if settings.use_celery:
+        try:
+            from web.tasks.audit_task import run_audit_task
+
+            set_task_status(task_id, "pending")
+            run_audit_task.delay(task_id, brand_id, image_paths, batch_size, compression, preconditions_dict)
+            return {"task_id": task_id, "status": "pending", "created_at": task.created_at, "executor": "celery"}
+        except Exception:
+            pass
+
     background_tasks.add_task(_run_audit, task_id, brand_id, image_paths, batch_size, compression, preconditions_dict)
-    return {"task_id": task_id, "status": "pending", "created_at": task.created_at}
+    set_task_status(task_id, "pending")
+    return {"task_id": task_id, "status": "pending", "created_at": task.created_at, "executor": "background_tasks"}
 
 
 async def _run_audit(
@@ -139,6 +165,7 @@ async def _run_audit(
                 task.updated_at = _datetime.now()
                 s.add(task)
                 s.commit()
+                set_task_status(task_id, "running")
 
         start_time = _datetime.now()
         try:
@@ -178,6 +205,7 @@ async def _run_audit(
                     task.updated_at = _datetime.now()
                     s.add(task)
                     s.commit()
+                    set_task_status(task_id, "completed")
 
             return results
 
@@ -190,6 +218,7 @@ async def _run_audit(
                     task.updated_at = _datetime.now()
                     s.add(task)
                     s.commit()
+                    set_task_status(task_id, "failed")
             raise
 
     loop = asyncio.get_event_loop()
@@ -327,16 +356,22 @@ def _determine_machine_result(formatted_report: dict) -> str:
 # ── 任务查询 ──────────────────────────────────────────────────────────────────
 
 @router.get("/tasks/{task_id}")
-def get_task(task_id: str, session: Session = Depends(get_session)):
+def get_task(task_id: str, identity: Identity = Depends(get_current_identity), session: Session = Depends(get_session)):
     """查询任务状态和结果（客户端轮询）"""
     task = session.get(AuditTask, task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
+    _ensure_task_access(task, identity)
+
+    cached_status = get_task_status(task_id)
+    if cached_status in ("pending", "running"):
+        task.status = cached_status
 
     resp = {
         "task_id": task.id,
         "brand_id": task.brand_id,
         "name": task.name,
+        "created_by": task.created_by,
         "image_purpose": task.image_purpose,
         "project_type": task.project_type,
         "project_desc": task.project_desc,
@@ -365,18 +400,24 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
 
 
 @router.delete("/tasks/{task_id}", status_code=204)
-def delete_task(task_id: str, session: Session = Depends(get_session)):
+def delete_task(task_id: str, identity: Identity = Depends(get_current_identity), session: Session = Depends(get_session)):
     """删除单条审核历史记录"""
     task = session.get(AuditTask, task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
+    _ensure_task_access(task, identity)
     session.delete(task)
     session.commit()
 
 
 @router.get("/tasks/{task_id}/images/{filename}")
-def get_task_image(task_id: str, filename: str):
+def get_task_image(task_id: str, filename: str, identity: Identity = Depends(get_current_identity), session: Session = Depends(get_session)):
     """获取审核任务上传的海报图片（用于前端缩略图展示）"""
+    task = session.get(AuditTask, task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+    _ensure_task_access(task, identity)
+
     image_path = UPLOAD_DIR / task_id / filename
     if not image_path.exists():
         raise HTTPException(404, detail="图片不存在")
@@ -390,14 +431,23 @@ def list_history(
     brand_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    identity: Identity = Depends(get_current_identity),
     session: Session = Depends(get_session),
 ):
     """审核历史列表，支持按品牌筛选和分页"""
     query = select(AuditTask).order_by(desc(AuditTask.created_at))
+    count_query = select(func.count()).select_from(AuditTask)
     if brand_id:
         query = query.where(AuditTask.brand_id == brand_id)
+        count_query = count_query.where(AuditTask.brand_id == brand_id)
 
-    total = len(session.exec(query).all())
+    if settings.enable_user_isolation and not _is_admin(identity):
+        if not identity.username:
+            raise HTTPException(403, detail="缺少用户身份，无法访问历史记录")
+        query = query.where(AuditTask.created_by == identity.username)
+        count_query = count_query.where(AuditTask.created_by == identity.username)
+
+    total = session.exec(count_query).one() or 0
     tasks = session.exec(query.offset((page - 1) * page_size).limit(page_size)).all()
 
     # 批量查询复核员名称
@@ -418,6 +468,7 @@ def list_history(
                 "task_id": t.id,
                 "name": t.name,
                 "brand_id": t.brand_id,
+                "created_by": t.created_by,
                 "machine_result": t.machine_result,
                 "created_at": t.created_at,
                 "duration": t.duration_seconds,
@@ -438,11 +489,12 @@ def list_history(
 
 
 @router.post("/tasks/{task_id}/request-review")
-def request_review(task_id: str, session: Session = Depends(get_session)):
+def request_review(task_id: str, identity: Identity = Depends(get_current_identity), session: Session = Depends(get_session)):
     """申请人工复核"""
     task = session.get(AuditTask, task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
+    _ensure_task_access(task, identity)
     if task.status != "completed":
         raise HTTPException(400, detail="只有已完成的任务才能申请人工复核")
 
@@ -459,12 +511,14 @@ def request_review(task_id: str, session: Session = Depends(get_session)):
 def export_report(
     task_id: str,
     format: str = Query("json", description="导出格式：json/markdown"),
+    identity: Identity = Depends(get_current_identity),
     session: Session = Depends(get_session),
 ):
     """导出审核报告（json 或 markdown 格式）"""
     task = session.get(AuditTask, task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
+    _ensure_task_access(task, identity)
     if task.status != "completed":
         raise HTTPException(400, detail="任务尚未完成，无法导出报告")
 

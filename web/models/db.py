@@ -29,6 +29,7 @@ class AuditTask(SQLModel, table=True):
     id: str                         = Field(primary_key=True)   # UUID，由应用层生成
     brand_id: str                   = Field(foreign_key="brands.id", index=True)
     name: Optional[str]             = None  # 素材名称（文件名）
+    created_by: Optional[str]       = Field(default=None, index=True)  # 任务创建者（用户名/域账号）
     image_purpose: Optional[str]    = None  # 图片用途
     project_type: Optional[str]     = None  # 项目类型
     project_desc: Optional[str]     = None  # 项目描述

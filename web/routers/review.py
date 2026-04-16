@@ -4,12 +4,13 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select, desc
+from sqlmodel import Session, select, desc, func
 
+from web.auth import require_admin
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Schedule, User
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+router = APIRouter(dependencies=[Depends(verify_api_key), Depends(require_admin)])
 
 
 @router.get("/review/tasks")
@@ -32,7 +33,13 @@ def list_review_tasks(
     elif status == "completed_review":
         query = query.where(AuditTask.review_at.isnot(None))
 
-    total = len(session.exec(query).all())
+    count_query = select(func.count()).select_from(AuditTask)
+    if status == "pending_review":
+        count_query = count_query.where(AuditTask.status == "pending_review")
+    elif status == "completed_review":
+        count_query = count_query.where(AuditTask.review_at.isnot(None))
+
+    total = session.exec(count_query).one() or 0
     tasks = session.exec(query.offset((page - 1) * page_size).limit(page_size)).all()
 
     return {
@@ -44,6 +51,7 @@ def list_review_tasks(
                 "task_id": t.id,
                 "name": t.name,
                 "brand_id": t.brand_id,
+                "created_by": t.created_by,
                 "status": t.status,
                 "machine_result": t.machine_result,
                 "created_at": t.created_at,
@@ -68,6 +76,7 @@ def get_review_task(task_id: str, session: Session = Depends(get_session)):
         "task_id": task.id,
         "name": task.name,
         "brand_id": task.brand_id,
+        "created_by": task.created_by,
         "status": task.status,
         "machine_result": task.machine_result,
         "created_at": task.created_at,

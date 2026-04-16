@@ -102,7 +102,7 @@ class LLMService:
         "gpt-4-turbo": (128000, 4096),
         "claude-3-opus": (200000, 4096),
         "claude-3-sonnet": (200000, 4096),
-        "doubao-vision": (128000, 8192),  # 豆包视觉模型
+        "mllm-vision": (128000, 8192),  # 多模态视觉模型
     }
 
     # Token估算参数
@@ -124,7 +124,7 @@ class LLMService:
     def _get_next_api_key(self) -> str:
         """轮询获取下一个 API Key"""
         # 获取 Key 列表（首次或配置变更时刷新）
-        keys = settings.get_openai_api_keys()
+        keys = settings.get_mllm_api_keys()
         if keys != self._api_keys:
             self._api_keys = keys
             self._key_index = 0
@@ -149,8 +149,8 @@ class LLMService:
             # 默认 max_tokens=4096，需要显式设置更大值
             api_key = self._get_next_api_key()
             self._llm = ChatOpenAI(
-                model=settings.doubao_model,
-                base_url=settings.openai_api_base,
+                model=settings.mllm_model,
+                base_url=settings.mllm_api_base,
                 api_key=api_key,
                 temperature=0,
                 timeout=180,
@@ -167,7 +167,7 @@ class LLMService:
     def context_limit(self) -> int:
         """获取当前模型的上下文窗口限制"""
         if self._context_limit is None:
-            model_name = settings.doubao_model.lower()
+            model_name = settings.mllm_model.lower()
             for key, (ctx, out) in self.MODEL_CONTEXT_LIMITS.items():
                 if key in model_name:
                     self._context_limit = ctx
@@ -267,15 +267,15 @@ class LLMService:
         """
         # 支持多 Key 设置
         if api_keys:
-            settings.openai_api_keys = ",".join(api_keys)
+            settings.mllm_api_keys = ",".join(api_keys)
         elif api_key:
-            settings.openai_api_key = api_key
-            settings.openai_api_keys = ""  # 清空多 Key 配置
+            settings.mllm_api_key = api_key
+            settings.mllm_api_keys = ""  # 清空多 Key 配置
 
         if api_base:
-            settings.openai_api_base = api_base
+            settings.mllm_api_base = api_base
         if model:
-            settings.doubao_model = model
+            settings.mllm_model = model
 
         # 重置所有缓存
         self._llm = None
@@ -283,7 +283,7 @@ class LLMService:
         self._output_limit = None
         self._api_keys = []
         self._key_index = 0
-        logger.info(f"API配置已更新，Key数量: {len(settings.get_openai_api_keys())}")
+        logger.info(f"API配置已更新，Key数量: {len(settings.get_mllm_api_keys())}")
 
     def audit_image(
         self,
@@ -314,8 +314,8 @@ class LLMService:
             if api_key:
                 from langchain_openai import ChatOpenAI
                 llm_instance = ChatOpenAI(
-                    model=settings.doubao_model,
-                    base_url=settings.openai_api_base,
+                    model=settings.mllm_model,
+                    base_url=settings.mllm_api_base,
                     api_key=api_key,
                     temperature=0,
                     timeout=180,
@@ -323,7 +323,7 @@ class LLMService:
                 )
             else:
                 # 多 Key 轮询：每次调用都获取新 Key
-                keys = settings.get_openai_api_keys()
+                keys = settings.get_mllm_api_keys()
                 if len(keys) > 1:
                     # 多 Key 模式，强制切换 Key
                     self._llm = None  # 清除缓存
@@ -659,8 +659,8 @@ class LLMService:
             if api_key:
                 from langchain_openai import ChatOpenAI
                 llm_instance = ChatOpenAI(
-                    model=settings.doubao_model,
-                    base_url=settings.openai_api_base,
+                    model=settings.mllm_model,
+                    base_url=settings.mllm_api_base,
                     api_key=api_key,
                     temperature=0,
                     timeout=300,
@@ -886,9 +886,9 @@ class LLMService:
 
         return result
 
-    def test_deepseek_connection(self) -> tuple[bool, str]:
+    def test_llm_connection(self) -> tuple[bool, str]:
         """
-        测试DeepSeek API连通性
+        测试文本模型 API 连通性
 
         Returns:
             (success, message) 元组
@@ -896,13 +896,13 @@ class LLMService:
         try:
             from langchain_openai import ChatOpenAI
 
-            if not settings.deepseek_api_key:
-                return False, "未配置DeepSeek API Key"
+            if not settings.llm_api_key:
+                return False, "未配置文本模型 API Key"
 
             llm = ChatOpenAI(
-                model=settings.deepseek_model,
-                base_url=settings.deepseek_api_base,
-                api_key=settings.deepseek_api_key,
+                model=settings.llm_model,
+                base_url=settings.llm_api_base,
+                api_key=settings.llm_api_key,
                 temperature=0.1,
                 timeout=30,
             )
@@ -922,9 +922,9 @@ class LLMService:
                 return False, "无法连接到服务器"
             return False, f"连接失败: {error_msg[:50]}"
 
-    def test_doubao_connection(self) -> tuple[bool, str]:
+    def test_mllm_connection(self) -> tuple[bool, str]:
         """
-        测试Doubao API连通性
+        测试多模态模型 API 连通性
 
         Returns:
             (success, message) 元组
@@ -932,14 +932,14 @@ class LLMService:
         try:
             from langchain_openai import ChatOpenAI
 
-            if not settings.openai_api_key:
-                return False, "未配置Doubao API Key"
+            if not settings.mllm_api_key:
+                return False, "未配置多模态模型 API Key"
 
             # 使用一个简单的测试请求
             llm = ChatOpenAI(
-                model=settings.doubao_model,
-                base_url=settings.openai_api_base,
-                api_key=settings.openai_api_key,
+                model=settings.mllm_model,
+                base_url=settings.mllm_api_base,
+                api_key=settings.mllm_api_key,
                 temperature=0.1,
                 timeout=30,
             )
@@ -959,7 +959,6 @@ class LLMService:
             elif "connection" in error_msg.lower():
                 return False, "无法连接到服务器"
             return False, f"连接失败: {error_msg[:50]}"
-
 
     # ── 异步包装方法（供 async FastAPI 路由直接 await，避免阻塞事件循环）──────────
 

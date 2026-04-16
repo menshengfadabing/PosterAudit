@@ -313,9 +313,9 @@ class AuditService:
             logger.info(f"使用 {len(reference_images)} 张参考图片")
 
         # 获取 API Keys 数量
-        api_keys = settings.get_openai_api_keys()
+        api_keys = settings.get_mllm_api_keys()
         if not api_keys:
-            api_keys = [settings.openai_api_key] if settings.openai_api_key else []
+            api_keys = [settings.mllm_api_key] if settings.mllm_api_key else []
         key_count = len(api_keys) if api_keys else 1
 
         # ── 同系列物料合并审核策略 ──────────────────────────────────────────
@@ -913,20 +913,20 @@ class AuditService:
                 from langchain_openai import ChatOpenAI
                 from langchain_core.messages import HumanMessage, SystemMessage
 
-                keys = settings.get_openai_api_keys()
+                keys = settings.get_mllm_api_keys()
                 if keys:
                     # 轮询获取 Key
                     key_index = idx % len(keys)
                     api_key = keys[key_index]
                     logger.info(f"[{file_path.name}] 使用 Key #{key_index + 1}")
                 else:
-                    api_key = settings.openai_api_key
+                    api_key = settings.mllm_api_key
                     logger.warning(f"[{file_path.name}] 无多 Key 配置，使用默认 Key")
 
                 # 创建线程专属的 LLM 实例
                 thread_llm = ChatOpenAI(
-                    model=settings.doubao_model,
-                    base_url=settings.openai_api_base,
+                    model=settings.mllm_model,
+                    base_url=settings.mllm_api_base,
                     api_key=api_key,
                     temperature=0,
                     timeout=180,
