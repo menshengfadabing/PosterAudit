@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, select, func, desc
+from sqlmodel import Session, select, func, desc, and_, or_
 
 from web.auth import require_admin
 from web.deps import get_session, verify_api_key
@@ -20,11 +20,21 @@ class ScheduleUpsert(BaseModel):
     reviewer_ids: list[str]
 
 
+def _pending_review_expr():
+    return or_(
+        AuditTask.status == "pending_review",
+        and_(
+            AuditTask.machine_result == "manual_review",
+            AuditTask.review_result.is_(None),
+        ),
+    )
+
+
 @router.get("/queue/status")
 def get_queue_status(session: Session = Depends(get_session)):
     """获取当前复核队列状态"""
     # 统计待复核任务数量
-    pending_query = select(func.count()).select_from(AuditTask).where(AuditTask.status == "pending_review")
+    pending_query = select(func.count()).select_from(AuditTask).where(_pending_review_expr())
     pending_count = session.exec(pending_query).first() or 0
 
     # 获取今日待复核复核人（简化实现：暂从 User 表中查询 active 状态的 reviewer）
@@ -103,9 +113,7 @@ def get_history_stats(
     review_count = session.exec(q).first() or 0
 
     # 待人工复核数量（按任务状态，不是机审结果）
-    pending_review_count_q = select(func.count()).select_from(AuditTask).where(
-        AuditTask.status == "pending_review",
-    )
+    pending_review_count_q = select(func.count()).select_from(AuditTask).where(_pending_review_expr())
     pending_review_count = session.exec(pending_review_count_q).first() or 0
 
     # 按品牌统计（取 top 5），关联品牌名称

@@ -854,6 +854,20 @@ class LLMService:
         detection.setdefault("layout", {})
         detection.setdefault("style", {})
 
+        # 纠正多模态输出中的类型漂移，避免下游 Pydantic 校验失败
+        logo = detection.get("logo", {})
+        if not isinstance(logo, dict):
+            logo = {"found": False}
+            detection["logo"] = logo
+        if logo.get("position") is None:
+            logo["position"] = ""
+        elif not isinstance(logo.get("position"), str):
+            logo["position"] = str(logo.get("position"))
+        if logo.get("color_type") is None:
+            logo["color_type"] = ""
+        elif not isinstance(logo.get("color_type"), str):
+            logo["color_type"] = str(logo.get("color_type"))
+
         # 根据规则结果计算 status
         # 优先级：FAIL > REVIEW > PASS
         # 全PASS → PASS，有FAIL → FAIL，否则 → REVIEW

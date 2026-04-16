@@ -73,6 +73,15 @@ class AuditService:
     def __init__(self):
         self._compression_config = self.DEFAULT_COMPRESSION.copy()
 
+    @staticmethod
+    def _safe_str(value: object, default: str = "") -> str:
+        """将任意值安全转换为字符串，避免 None 导致 Pydantic 校验错误。"""
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return value
+        return str(value)
+
     def set_compression_config(self, config: dict):
         """设置压缩配置"""
         self._compression_config.update(config)
@@ -577,11 +586,11 @@ class AuditService:
         logo_data = detection_data.get("logo", {})
         logo = LogoInfo(
             found=logo_data.get("found", False),
-            position=logo_data.get("position", ""),
+            position=self._safe_str(logo_data.get("position"), ""),
             position_correct=logo_data.get("position_correct"),
             size_percent=logo_data.get("size_percent"),
             size_correct=logo_data.get("size_correct"),
-            color_type=logo_data.get("color_type", ""),
+            color_type=self._safe_str(logo_data.get("color_type"), ""),
             color_correct=logo_data.get("color_correct"),
             safe_margin_ok=logo_data.get("safe_margin_ok"),
             deformed=logo_data.get("deformed"),
@@ -628,6 +637,8 @@ class AuditService:
 
         # 构建规则检查清单
         rule_checks = self._build_rule_checks(result, rules_checklist)
+        if rules_checklist and not rule_checks:
+            raise ValueError("LLM 未返回有效规则检查项")
 
         # 构建问题列表
         issues = []

@@ -114,6 +114,22 @@ async def submit_audit(
         input_meta=input_meta,
     )
     session.add(task)
+
+    # 同步提交用户信息（用于后续列表显示中文姓名）
+    if identity.username:
+        creator = session.get(User, identity.username)
+        if creator is None:
+            creator = User(
+                id=identity.username,
+                name=identity.real_name or identity.username,
+                role="user",
+                status="active",
+            )
+        elif identity.real_name and creator.name != identity.real_name:
+            creator.name = identity.real_name
+            creator.updated_at = datetime.now()
+        session.add(creator)
+
     session.commit()
 
     if mode == "sync":
@@ -187,11 +203,24 @@ async def _run_audit(
 
             results = [_serialize(r) for r in reports]
 
+            # 至少需要一条带规则检查项的成功结果，否则判定本次审核失败（触发 Celery 重试）
+            valid_success_count = 0
+            for item in results:
+                if item.get("status") != "success":
+                    continue
+                report = item.get("report") or {}
+                if report.get("rule_checks"):
+                    valid_success_count += 1
+            if valid_success_count == 0:
+                raise RuntimeError("审核失败：未生成有效规则检查结果")
+
             # 计算耗时
             elapsed_seconds = int((_datetime.now() - start_time).total_seconds())
 
             # 生成 formatted_report 和 machine_result
             formatted_report = _generate_formatted_report(results)
+            if not formatted_report.get("rule_checks"):
+                raise RuntimeError("审核失败：格式化报告为空")
             machine_result = _determine_machine_result(formatted_report)
 
             with SyncSession(engine) as s:
@@ -389,12 +418,16 @@ def get_task(task_id: str, identity: Identity = Depends(get_current_identity), s
 
     # 返回复核员信息
     reviewer_ids = task.reviewer_ids or []
-    reviewer_name_map: dict[str, str] = {}
-    if reviewer_ids:
-        for u in session.exec(select(User).where(User.id.in_(reviewer_ids))).all():
-            reviewer_name_map[u.id] = u.name
+    user_ids = set(reviewer_ids)
+    if task.created_by:
+        user_ids.add(task.created_by)
+    user_name_map: dict[str, str] = {}
+    if user_ids:
+        for u in session.exec(select(User).where(User.id.in_(list(user_ids)))).all():
+            user_name_map[u.id] = u.name
+    resp["created_by_name"] = user_name_map.get(task.created_by, task.created_by)
     resp["reviewer_ids"] = reviewer_ids
-    resp["reviewers"] = [{"user_id": uid, "name": reviewer_name_map.get(uid, uid)} for uid in reviewer_ids]
+    resp["reviewers"] = [{"user_id": uid, "name": user_name_map.get(uid, uid)} for uid in reviewer_ids]
 
     return resp
 
@@ -452,12 +485,16 @@ def list_history(
 
     # 批量查询复核员名称
     all_reviewer_ids: set[str] = set()
+    all_creator_ids: set[str] = set()
     for t in tasks:
         all_reviewer_ids.update(t.reviewer_ids or [])
-    reviewer_name_map: dict[str, str] = {}
-    if all_reviewer_ids:
-        for u in session.exec(select(User).where(User.id.in_(list(all_reviewer_ids)))).all():
-            reviewer_name_map[u.id] = u.name
+        if t.created_by:
+            all_creator_ids.add(t.created_by)
+    user_ids = list(all_reviewer_ids.union(all_creator_ids))
+    user_name_map: dict[str, str] = {}
+    if user_ids:
+        for u in session.exec(select(User).where(User.id.in_(user_ids))).all():
+            user_name_map[u.id] = u.name
 
     return {
         "total": total,
@@ -469,6 +506,7 @@ def list_history(
                 "name": t.name,
                 "brand_id": t.brand_id,
                 "created_by": t.created_by,
+                "created_by_name": user_name_map.get(t.created_by, t.created_by),
                 "machine_result": t.machine_result,
                 "created_at": t.created_at,
                 "duration": t.duration_seconds,
@@ -481,7 +519,7 @@ def list_history(
                 "review_at": t.review_at,
                 "per_image_reviews": t.per_image_reviews or [],
                 "reviewer_ids": t.reviewer_ids or [],
-                "reviewers": [{"user_id": uid, "name": reviewer_name_map.get(uid, uid)} for uid in (t.reviewer_ids or [])],
+                "reviewers": [{"user_id": uid, "name": user_name_map.get(uid, uid)} for uid in (t.reviewer_ids or [])],
             }
             for t in tasks
         ],

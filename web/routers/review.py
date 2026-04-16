@@ -4,13 +4,34 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select, desc, func
+from sqlmodel import Session, select, desc, func, and_, or_
 
 from web.auth import require_admin
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Schedule, User
 
 router = APIRouter(dependencies=[Depends(verify_api_key), Depends(require_admin)])
+
+
+def _pending_review_expr():
+    """待复核任务判定：
+    1) 显式申请人工复核：status=pending_review
+    2) 机审结果为 manual_review 且尚未有人工结论
+    """
+    return or_(
+        AuditTask.status == "pending_review",
+        and_(
+            AuditTask.machine_result == "manual_review",
+            AuditTask.review_result.is_(None),
+        ),
+    )
+
+
+def _is_pending_review_task(task: AuditTask) -> bool:
+    return (
+        task.status == "pending_review"
+        or (task.machine_result == "manual_review" and task.review_result is None)
+    )
 
 
 @router.get("/review/tasks")
@@ -29,18 +50,23 @@ def list_review_tasks(
     query = select(AuditTask).order_by(desc(AuditTask.created_at))
 
     if status == "pending_review":
-        query = query.where(AuditTask.status == "pending_review")
+        query = query.where(_pending_review_expr())
     elif status == "completed_review":
         query = query.where(AuditTask.review_at.isnot(None))
 
     count_query = select(func.count()).select_from(AuditTask)
     if status == "pending_review":
-        count_query = count_query.where(AuditTask.status == "pending_review")
+        count_query = count_query.where(_pending_review_expr())
     elif status == "completed_review":
         count_query = count_query.where(AuditTask.review_at.isnot(None))
 
     total = session.exec(count_query).one() or 0
     tasks = session.exec(query.offset((page - 1) * page_size).limit(page_size)).all()
+    creator_ids = list({t.created_by for t in tasks if t.created_by})
+    creator_name_map: dict[str, str] = {}
+    if creator_ids:
+        for u in session.exec(select(User).where(User.id.in_(creator_ids))).all():
+            creator_name_map[u.id] = u.name
 
     return {
         "total": total,
@@ -52,7 +78,8 @@ def list_review_tasks(
                 "name": t.name,
                 "brand_id": t.brand_id,
                 "created_by": t.created_by,
-                "status": t.status,
+                "created_by_name": creator_name_map.get(t.created_by, t.created_by),
+                "status": "pending_review" if _is_pending_review_task(t) else t.status,
                 "machine_result": t.machine_result,
                 "created_at": t.created_at,
                 "input_meta": t.input_meta,
@@ -72,12 +99,18 @@ def get_review_task(task_id: str, session: Session = Depends(get_session)):
     if not task:
         raise HTTPException(404, detail="任务不存在")
 
+    creator_name = None
+    if task.created_by:
+        user = session.get(User, task.created_by)
+        creator_name = user.name if user else task.created_by
+
     return {
         "task_id": task.id,
         "name": task.name,
         "brand_id": task.brand_id,
         "created_by": task.created_by,
-        "status": task.status,
+        "created_by_name": creator_name,
+        "status": "pending_review" if _is_pending_review_task(task) else task.status,
         "machine_result": task.machine_result,
         "created_at": task.created_at,
         "input_meta": task.input_meta,
@@ -102,7 +135,7 @@ def submit_image_review_decision(
     task = session.get(AuditTask, task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
-    if task.status != "pending_review":
+    if not _is_pending_review_task(task):
         raise HTTPException(400, detail="当前任务状态不支持提交复核结果")
     if decision not in ("passed", "failed"):
         raise HTTPException(400, detail="decision 必须是 passed 或 failed")
@@ -198,7 +231,7 @@ def submit_review_decision(
     task = session.get(AuditTask, task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
-    if task.status != "pending_review":
+    if not _is_pending_review_task(task):
         raise HTTPException(400, detail="当前任务状态不支持提交复核结果")
 
     if decision not in ("passed", "failed"):
