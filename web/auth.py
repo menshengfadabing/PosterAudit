@@ -82,7 +82,10 @@ async def get_current_identity(
             source="java",
         )
 
-    # 非强校验模式：允许通过 Header 透传用户上下文
+    # 非强校验模式：允许通过 Header 透传用户上下文（可通过配置关闭）
+    if not settings.allow_header_auth_fallback:
+        return Identity(source="anonymous")
+
     is_admin = _parse_bool(x_user_admin) or (x_user_role or "").strip().lower() == "admin"
     return Identity(
         username=(x_username or "").strip() or None,

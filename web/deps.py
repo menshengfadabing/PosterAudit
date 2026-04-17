@@ -34,7 +34,7 @@ _ALLOWED_KEYS: list[str] = []
 def _get_allowed_keys() -> list[str]:
     global _ALLOWED_KEYS
     if not _ALLOWED_KEYS:
-        raw = os.getenv("ALLOWED_API_KEYS", "")
+        raw = settings.allowed_api_keys or os.getenv("ALLOWED_API_KEYS", "")
         _ALLOWED_KEYS = [k.strip() for k in raw.split(",") if k.strip()]
     return _ALLOWED_KEYS
 
@@ -43,6 +43,8 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
     """校验 API Key，Header 名称：X-API-Key。未配置 ALLOWED_API_KEYS 时跳过鉴权。"""
     allowed = _get_allowed_keys()
     if not allowed:
+        if settings.require_api_key:
+            raise HTTPException(status_code=401, detail="API Key required")
         return x_api_key
     if x_api_key not in allowed:
         raise HTTPException(status_code=401, detail="Invalid API Key")

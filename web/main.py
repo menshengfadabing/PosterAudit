@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel
 
+from src.utils.config import settings
 from web.deps import engine
 from web.routers import audit, brands, review, stats
 
@@ -36,7 +37,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.get_cors_allow_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -60,13 +60,16 @@ class Settings(BaseSettings):
     # Web API 配置
     database_url: str = "postgresql+psycopg2://postgres:postgres123456@localhost:5432/app"
     allowed_api_keys: str = ""   # 逗号分隔；为空时跳过鉴权（开发模式）
+    require_api_key: bool = False  # 生产建议开启：未配置 ALLOWED_API_KEYS 则拒绝请求
     upload_dir: str = ""
+    cors_allow_origins: str = "*"  # 生产建议配置为逗号分隔域名白名单
 
     # 角色鉴权配置（回源 Java userInfo）
     enable_java_auth: bool = False
     java_userinfo_url: str = ""
     java_token_header: str = "Token"
     java_auth_timeout_seconds: float = 5.0
+    allow_header_auth_fallback: bool = True  # 非 Java 鉴权时是否允许通过 Header 透传身份
 
     # 用户数据隔离（历史/任务仅展示本人数据）
     enable_user_isolation: bool = True
@@ -144,6 +147,12 @@ class Settings(BaseSettings):
             return [self.mllm_api_key]
 
         return []
+
+    def get_cors_allow_origins(self) -> list[str]:
+        raw = (self.cors_allow_origins or "").strip()
+        if not raw or raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
 
 class BrandRulesLoader:

@@ -1,0 +1,104 @@
+services:
+  api:
+    image: check_2-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: check2-api
+    env_file:
+      - .env.docker
+    environment:
+      PYTHONPATH: /app
+    command: ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+    ports:
+      - "127.0.0.1:${API_BIND_PORT:-18080}:8080"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    restart: unless-stopped
+
+  celery1:
+    image: check_2-app:latest
+    container_name: check2-celery1
+    env_file:
+      - .env.docker
+    environment:
+      PYTHONPATH: /app
+    command: ["celery", "--workdir", "/app", "-A", "celery_app.celery", "worker", "-Q", "audit", "-l", "info", "--concurrency", "${CELERY_CONCURRENCY:-2}", "-n", "audit1@%h"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  celery2:
+    image: check_2-app:latest
+    container_name: check2-celery2
+    env_file:
+      - .env.docker
+    environment:
+      PYTHONPATH: /app
+    command: ["celery", "--workdir", "/app", "-A", "celery_app.celery", "worker", "-Q", "audit", "-l", "info", "--concurrency", "${CELERY_CONCURRENCY:-2}", "-n", "audit2@%h"]
+    volumes:
+      - ./data:/app/data
+    profiles: ["scale"]
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  celery3:
+    image: check_2-app:latest
+    container_name: check2-celery3
+    env_file:
+      - .env.docker
+    environment:
+      PYTHONPATH: /app
+    command: ["celery", "--workdir", "/app", "-A", "celery_app.celery", "worker", "-Q", "audit", "-l", "info", "--concurrency", "${CELERY_CONCURRENCY:-2}", "-n", "audit3@%h"]
+    volumes:
+      - ./data:/app/data
+    profiles: ["scale"]
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    container_name: check2-postgres
+    profiles: ["infra"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123456}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: check2-redis
+    profiles: ["infra"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis123456}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123456}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
