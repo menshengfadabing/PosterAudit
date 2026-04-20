@@ -152,6 +152,35 @@ def get_history_stats(
 
 # ── 排班管理 ──────────────────────────────────────────────────────────────────
 
+@router.get("/users")
+def list_users(
+    q: Optional[str] = None,
+    role: Optional[str] = None,
+    session: Session = Depends(get_session),
+):
+    """获取用户列表（管理员）"""
+    users = session.exec(select(User).order_by(User.updated_at.desc())).all()
+    items = []
+    ql = (q or "").strip().lower()
+    role_filter = (role or "").strip().lower()
+    for u in users:
+        if role_filter and (u.role or "").strip().lower() != role_filter:
+            continue
+        if ql:
+            hay = f"{u.id} {u.name or ''} {u.dept or ''}".lower()
+            if ql not in hay:
+                continue
+        items.append({
+            "user_id": u.id,
+            "name": u.name,
+            "dept": u.dept,
+            "role": u.role,
+            "status": u.status,
+            "updated_at": u.updated_at,
+        })
+    return items
+
+
 @router.get("/reviewers")
 def list_reviewers(session: Session = Depends(get_session)):
     """获取所有复核员列表"""
@@ -162,15 +191,26 @@ def list_reviewers(session: Session = Depends(get_session)):
 @router.post("/reviewers")
 def create_reviewer(
     user_id: str,
-    name: str,
+    name: Optional[str] = None,
     dept: Optional[str] = None,
     session: Session = Depends(get_session),
 ):
-    """新增复核员"""
+    """新增复核员；若用户已存在则升级为 reviewer。"""
     existing = session.get(User, user_id)
     if existing:
-        raise HTTPException(400, detail="用户 ID 已存在")
-    user = User(id=user_id, name=name, dept=dept, role="reviewer", status="active")
+        existing.role = "reviewer"
+        existing.status = "active"
+        if name is not None and name.strip():
+            existing.name = name.strip()
+        if dept is not None:
+            existing.dept = dept
+        existing.updated_at = datetime.now()
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        return {"user_id": existing.id, "name": existing.name, "dept": existing.dept, "status": existing.status}
+
+    user = User(id=user_id, name=(name or user_id), dept=dept, role="reviewer", status="active")
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -204,12 +244,24 @@ def update_reviewer(
 
 @router.delete("/reviewers/{user_id}", status_code=204)
 def delete_reviewer(user_id: str, session: Session = Depends(get_session)):
-    """删除复核员（幂等：不存在时也返回 204）"""
+    """删除复核员权限（降级为普通用户，幂等）"""
     user = session.get(User, user_id)
-    if not user or user.role != "reviewer":
+    if not user:
         return
-    session.delete(user)
-    session.commit()
+
+    if user.role == "reviewer":
+        user.role = "user"
+        user.updated_at = datetime.now()
+        session.add(user)
+
+        schedules = session.exec(select(Schedule)).all()
+        for s in schedules:
+            ids = list(s.reviewer_ids or [])
+            if user_id in ids:
+                s.reviewer_ids = [i for i in ids if i != user_id]
+                session.add(s)
+
+        session.commit()
 
 
 @router.get("/schedules")
