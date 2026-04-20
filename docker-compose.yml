@@ -69,7 +69,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16
+    image: postgres:17-alpine
     container_name: check2-postgres
     profiles: ["infra"]
     environment:
@@ -86,7 +86,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: check2-redis
     profiles: ["infra"]
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis123456}"]
