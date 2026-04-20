@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import Session, select, func, desc, and_, or_
 
@@ -33,22 +33,19 @@ def _pending_review_expr():
 @router.get("/queue/status")
 def get_queue_status(session: Session = Depends(get_session)):
     """获取当前复核队列状态"""
-    # 统计待复核任务数量
     pending_query = select(func.count()).select_from(AuditTask).where(_pending_review_expr())
     pending_count = session.exec(pending_query).first() or 0
 
-    # 获取今日待复核复核人（简化实现：暂从 User 表中查询 active 状态的 reviewer）
-    reviewers_query = select(User).where(User.role == "reviewer", User.status == "active")
+    reviewers_query = select(User).where(User.role == "admin", User.status == "active")
     reviewers = session.exec(reviewers_query).all()
 
     reviewers_info = []
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     for r in reviewers:
-        # 统计该复核人当日待复核数量（简化实现）
-        today = datetime.now().strftime("%Y-%m-%d")
         task_count_query = (
             select(func.count())
             .select_from(AuditTask)
-            .where(AuditTask.reviewer_id == r.id, AuditTask.review_at >= today)
+            .where(AuditTask.reviewer_id == r.id, AuditTask.review_at >= today_start)
         )
         task_count = session.exec(task_count_query).first() or 0
 
@@ -72,15 +69,11 @@ def get_history_stats(
     session: Session = Depends(get_session),
 ):
     """获取历史统计数据（最近 N 天）"""
-    from datetime import timedelta
-
     cutoff_date = datetime.now() - timedelta(days=days)
 
-    # 总数统计
     total_count_query = select(func.count()).select_from(AuditTask).where(AuditTask.created_at >= cutoff_date)
     total_count = session.exec(total_count_query).first() or 0
 
-    # 按状态统计
     status_counts = {}
     for status in ("pending", "running", "completed", "failed", "pending_review"):
         q = select(func.count()).select_from(AuditTask).where(
@@ -88,11 +81,6 @@ def get_history_stats(
             AuditTask.created_at >= cutoff_date,
         )
         status_counts[status] = session.exec(q).first() or 0
-
-    # 按机审结果统计
-    pass_count = 0
-    fail_count = 0
-    review_count = 0
 
     q = select(func.count()).select_from(AuditTask).where(
         AuditTask.machine_result == "passed",
@@ -112,11 +100,9 @@ def get_history_stats(
     )
     review_count = session.exec(q).first() or 0
 
-    # 待人工复核数量（按任务状态，不是机审结果）
     pending_review_count_q = select(func.count()).select_from(AuditTask).where(_pending_review_expr())
     pending_review_count = session.exec(pending_review_count_q).first() or 0
 
-    # 按品牌统计（取 top 5），关联品牌名称
     brand_query = (
         select(AuditTask.brand_id, func.count().label("count"))
         .where(AuditTask.created_at >= cutoff_date)
@@ -126,7 +112,6 @@ def get_history_stats(
     )
     brand_stats = session.exec(brand_query).all()
 
-    # 查询品牌名称
     brand_ids = [b[0] for b in brand_stats]
     brands_map: dict[str, str] = {}
     if brand_ids:
@@ -156,35 +141,48 @@ def get_history_stats(
 def list_users(
     q: Optional[str] = None,
     role: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=1, le=1000),
     session: Session = Depends(get_session),
 ):
     """获取用户列表（管理员）"""
-    users = session.exec(select(User).order_by(User.updated_at.desc())).all()
-    items = []
-    ql = (q or "").strip().lower()
+    query = select(User)
+
     role_filter = (role or "").strip().lower()
-    for u in users:
-        if role_filter and (u.role or "").strip().lower() != role_filter:
-            continue
-        if ql:
-            hay = f"{u.id} {u.name or ''} {u.dept or ''}".lower()
-            if ql not in hay:
-                continue
-        items.append({
+    if role_filter:
+        query = query.where(User.role == role_filter)
+
+    ql = (q or "").strip()
+    if ql:
+        like = f"%{ql}%"
+        query = query.where(
+            or_(
+                User.id.ilike(like),
+                User.name.ilike(like),
+                User.dept.ilike(like),
+            )
+        )
+
+    query = query.order_by(User.updated_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    users = session.exec(query).all()
+
+    return [
+        {
             "user_id": u.id,
             "name": u.name,
             "dept": u.dept,
             "role": u.role,
             "status": u.status,
             "updated_at": u.updated_at,
-        })
-    return items
+        }
+        for u in users
+    ]
 
 
 @router.get("/reviewers")
 def list_reviewers(session: Session = Depends(get_session)):
     """获取所有复核员列表"""
-    reviewers = session.exec(select(User).where(User.role == "reviewer")).all()
+    reviewers = session.exec(select(User).where(User.role == "admin")).all()
     return [{"user_id": r.id, "name": r.name, "dept": r.dept, "status": r.status} for r in reviewers]
 
 
@@ -198,7 +196,7 @@ def create_reviewer(
     """新增复核员；若用户已存在则升级为 reviewer。"""
     existing = session.get(User, user_id)
     if existing:
-        existing.role = "reviewer"
+        existing.role = "admin"
         existing.status = "active"
         if name is not None and name.strip():
             existing.name = name.strip()
@@ -210,7 +208,7 @@ def create_reviewer(
         session.refresh(existing)
         return {"user_id": existing.id, "name": existing.name, "dept": existing.dept, "status": existing.status}
 
-    user = User(id=user_id, name=(name or user_id), dept=dept, role="reviewer", status="active")
+    user = User(id=user_id, name=(name or user_id), dept=dept, role="admin", status="active")
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -227,7 +225,7 @@ def update_reviewer(
 ):
     """更新复核员信息"""
     user = session.get(User, user_id)
-    if not user or user.role != "reviewer":
+    if not user or user.role != "admin":
         raise HTTPException(404, detail="复核员不存在")
     if name is not None:
         user.name = name
@@ -249,7 +247,7 @@ def delete_reviewer(user_id: str, session: Session = Depends(get_session)):
     if not user:
         return
 
-    if user.role == "reviewer":
+    if user.role == "admin":
         user.role = "user"
         user.updated_at = datetime.now()
         session.add(user)
@@ -278,7 +276,6 @@ def list_schedules(
         query = query.where(Schedule.date <= end_date)
     schedules = session.exec(query).all()
 
-    # 批量查询复核员名称
     all_ids: set[str] = set()
     for s in schedules:
         all_ids.update(s.reviewer_ids or [])
