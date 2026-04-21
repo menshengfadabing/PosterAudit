@@ -60,9 +60,27 @@ class ReferenceImage(SQLModel, table=True):
     image_type: str    = Field(default="logo")
     description: str   = Field(default="")
     mime_type: str     = Field(default="image/png")
+    object_key: Optional[str] = Field(default=None, index=True)
     image_base64: Optional[str] = Field(default=None, sa_column=Column(Text))
     file_size: int     = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class BrandParseTask(SQLModel, table=True):
+    """品牌规范解析异步任务"""
+    __tablename__ = "brand_parse_tasks"
+
+    id: str = Field(primary_key=True)
+    mode: str = Field(default="single", index=True)  # single/merge
+    status: str = Field(default="pending", index=True)  # pending/running/completed/failed
+    brand_name: str = Field(default="")
+    created_by: Optional[str] = Field(default=None, index=True)
+    input_meta: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    result: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
 
 
 class User(SQLModel, table=True):

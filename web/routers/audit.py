@@ -1,25 +1,27 @@
 """审核提交 + 任务查询 + 历史记录路由（3个接口）"""
 
 import asyncio
+import mimetypes
+import tempfile
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlmodel import Session, desc, func, select
 
 from src.services.audit_service import audit_service
 from src.services.rules_context import rules_context
 from src.utils.config import get_app_dir, settings
+from src.utils.object_storage import object_storage
 from src.utils.redis_client import get_task_status, set_task_status
 from web.auth import Identity, get_current_identity
 from web.deps import get_session, verify_api_key
 from web.models.db import AuditTask, Brand, User
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
-
-UPLOAD_DIR = get_app_dir() / "data" / "uploads"
 
 
 def _is_admin(identity: Identity) -> bool:
@@ -32,6 +34,14 @@ def _ensure_task_access(task: AuditTask, identity: Identity) -> None:
         raise HTTPException(403, detail="缺少用户身份，无法访问该任务")
     if task.created_by and task.created_by != identity.username:
         raise HTTPException(403, detail="无权限访问该任务")
+
+
+def _legacy_upload_dir() -> Path:
+    """本地文件兜底目录（兼容历史任务/未启用对象存储场景）"""
+    custom_dir = (settings.upload_dir or "").strip()
+    if custom_dir:
+        return Path(custom_dir)
+    return get_app_dir() / "data" / "uploads"
 
 # ── 审核提交 ────────────────────────────────────────────────────��─────────────
 
@@ -76,24 +86,40 @@ async def submit_audit(
     if same_series_material and preconditions_dict is not None:
         preconditions_dict["is_same_series_material"] = same_series_material
 
-    # 保存上传文件到临时目录
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     task_id = str(uuid.uuid4())
-    task_dir = UPLOAD_DIR / task_id
-    task_dir.mkdir(parents=True, exist_ok=True)
+    image_paths: list[str] = []
+    image_filenames: list[str] = []
 
-    image_paths = []
+    task_dir: Optional[Path] = None
+    if not object_storage.enabled:
+        # 未开启对象存储时，保持旧逻辑写本地目录
+        upload_dir = _legacy_upload_dir()
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        task_dir = upload_dir / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+
     for img_file in images:
-        dest = task_dir / (img_file.filename or f"{uuid.uuid4().hex}.jpg")
         content = await img_file.read()
-        dest.write_bytes(content)
-        image_paths.append(str(dest))
+        filename = Path(img_file.filename or f"{uuid.uuid4().hex}.jpg").name
+        image_filenames.append(filename)
+        if object_storage.enabled:
+            mime_type = (img_file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream")
+            object_key = object_storage.build_task_image_key(task_id, filename)
+            object_storage.put_bytes(object_key, content, mime_type)
+            # 对象存储模式下，异步任务仅传文件名，由执行端回源下载
+            image_paths.append(filename)
+        else:
+            if task_dir is None:
+                raise HTTPException(500, detail="本地上传目录初始化失败")
+            dest = task_dir / filename
+            dest.write_bytes(content)
+            image_paths.append(str(dest))
 
     input_meta = {
         "image_count": len(image_paths),
         "batch_size": batch_size,
         "compression": compression,
-        "filenames": [p.split("/")[-1] for p in image_paths],
+        "filenames": image_filenames,
         "preconditions": preconditions_dict,
         "same_series_material": same_series_material,
     }
@@ -168,7 +194,10 @@ async def _run_audit(
     from web.deps import engine
     from datetime import datetime as _datetime
 
+    temp_work_dir: Optional[Path] = None
+
     def _do_audit():
+        nonlocal temp_work_dir
         # 设置压缩预设
         preset = audit_service.COMPRESSION_PRESETS.get(compression, audit_service.COMPRESSION_PRESETS["balanced"])
         audit_service.set_compression_config(preset)
@@ -185,8 +214,27 @@ async def _run_audit(
 
         start_time = _datetime.now()
         try:
+            # 对象存储模式下，将文件名/对象拉取为本地临时文件供审核引擎读取
+            effective_paths = image_paths
+            if object_storage.enabled:
+                temp_work_dir = Path(tempfile.mkdtemp(prefix=f"audit-{task_id}-"))
+                restored_paths: list[str] = []
+                for item in image_paths:
+                    p = Path(item)
+                    if p.exists():
+                        restored_paths.append(str(p))
+                        continue
+
+                    filename = p.name
+                    object_key = object_storage.build_task_image_key(task_id, filename)
+                    content = object_storage.get_bytes(object_key)
+                    local_path = temp_work_dir / filename
+                    local_path.write_bytes(content)
+                    restored_paths.append(str(local_path))
+                effective_paths = restored_paths
+
             reports = audit_service.batch_audit_merged(
-                image_paths=image_paths,
+                image_paths=effective_paths,
                 brand_id=brand_id,
                 max_images_per_request=batch_size,
                 preconditions=preconditions,
@@ -251,7 +299,14 @@ async def _run_audit(
             raise
 
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _do_audit)
+    try:
+        return await loop.run_in_executor(None, _do_audit)
+    finally:
+        if temp_work_dir and temp_work_dir.exists():
+            for p in temp_work_dir.iterdir():
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+            temp_work_dir.rmdir()
 
 
 def _generate_formatted_report(results: list) -> dict:
@@ -439,6 +494,13 @@ def delete_task(task_id: str, identity: Identity = Depends(get_current_identity)
     if not task:
         raise HTTPException(404, detail="任务不存在")
     _ensure_task_access(task, identity)
+
+    if object_storage.enabled:
+        filenames = (task.input_meta or {}).get("filenames") or []
+        for filename in filenames:
+            object_key = object_storage.build_task_image_key(task_id, str(filename))
+            object_storage.delete(object_key)
+
     session.delete(task)
     session.commit()
 
@@ -451,10 +513,20 @@ def get_task_image(task_id: str, filename: str, identity: Identity = Depends(get
         raise HTTPException(404, detail="任务不存在")
     _ensure_task_access(task, identity)
 
-    image_path = UPLOAD_DIR / task_id / filename
-    if not image_path.exists():
-        raise HTTPException(404, detail="图片不存在")
-    return FileResponse(str(image_path))
+    if object_storage.enabled:
+        object_key = object_storage.build_task_image_key(task_id, filename)
+        if object_storage.stat_exists(object_key):
+            content = object_storage.get_bytes(object_key)
+            media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            return Response(content=content, media_type=media_type)
+
+    # 兼容历史本地存储
+    image_path = _legacy_upload_dir() / task_id / filename
+    if image_path.exists():
+        media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return Response(content=image_path.read_bytes(), media_type=media_type)
+
+    raise HTTPException(404, detail="图片不存在")
 
 
 

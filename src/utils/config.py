@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     allowed_api_keys: str = ""   # 逗号分隔；为空时跳过鉴权（开发模式）
     require_api_key: bool = False  # 生产建议开启：未配置 ALLOWED_API_KEYS 则拒绝请求
     upload_dir: str = ""
+
+    # 对象存储（MinIO）配置
+    enable_minio_storage: bool = False
+    minio_endpoint: str = ""
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_bucket: str = "audit-images"
+    minio_secure: bool = False
+    minio_task_prefix: str = "tasks"
+    minio_reference_prefix: str = "references"
     cors_allow_origins: str = "*"  # 生产建议配置为逗号分隔域名白名单
 
     # 角色鉴权配置（回源 Java userInfo）

@@ -59,6 +59,8 @@ def _migrate_reference_images_table() -> None:
         columns = {c["name"] for c in inspector.get_columns("reference_images")}
         if "mime_type" not in columns:
             conn.execute(text("ALTER TABLE reference_images ADD COLUMN mime_type VARCHAR(255) DEFAULT 'image/png'"))
+        if "object_key" not in columns:
+            conn.execute(text("ALTER TABLE reference_images ADD COLUMN object_key VARCHAR(512)"))
         if "image_base64" not in columns:
             conn.execute(text("ALTER TABLE reference_images ADD COLUMN image_base64 TEXT"))
 

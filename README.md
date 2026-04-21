@@ -66,22 +66,25 @@ uv sync
 ./scripts/backendctl.sh logs api
 ./scripts/backendctl.sh logs celery 1
 ./scripts/backendctl.sh down
+
+# 若 docker compose down 提示网络仍占用，可执行强制清理
+./scripts/docker-down-force.sh
 ```
 
 ### 5.4 可选参数
 ```bash
-CELERY_WORKERS=3 CELERY_CONCURRENCY=8 API_PORT=8080 ./scripts/backendctl.sh up
+CELERY_WORKERS=3 CELERY_CONCURRENCY=8 API_PORT=18080 ./scripts/backendctl.sh up
 ```
 
 ## 6. 手动启动（备选）
 ```bash
-uv run uvicorn web.main:app --host 0.0.0.0 --port 8080 --reload
+uv run uvicorn web.main:app --host 0.0.0.0 --port 18080 --reload
 uv run celery -A celery_app.celery worker -Q audit -l info --concurrency=8 -n audit1@%h
 ```
 
 健康检查：
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:18080/health
 ```
 
 ## 7. 常用接口（`/api/v1`）
@@ -91,7 +94,7 @@ curl http://localhost:8080/health
 - 统计：`/queue/status`、`/history/stats`、`/reviewers`
 
 ## 8. 联调说明
-前端仓库 `design-portal-front` 通过 `/audit-api` 代理到本服务（默认 `http://localhost:8080`）。
+前端仓库 `design-portal-front` 通过 `/audit-api` 代理到本服务（默认 `http://localhost:18080`）。
 
 ## 9. 性能测试
 - 脚本：`test/perf/locustfile.py`、`test/perf/test_consistency.py`

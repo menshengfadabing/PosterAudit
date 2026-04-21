@@ -19,6 +19,7 @@ from src.models.schemas import (
     SecondaryRule,
 )
 from src.utils.config import settings, get_app_dir
+from src.utils.object_storage import object_storage
 
 logger = logging.getLogger(__name__)
 
@@ -472,16 +473,30 @@ class RulesContextManager:
             if db_images:
                 images_data = []
                 for img in db_images:
-                    if not img.image_base64:
-                        continue
-                    mime_type = (img.mime_type or "image/png").strip()
+                    mime_type = (img.mime_type or "image/png").strip() or "image/png"
                     image_format = mime_type.split("/", 1)[-1].lower()
                     if image_format == "jpg":
                         image_format = "jpeg"
                     if image_format not in ["png", "jpeg", "gif", "bmp", "webp"]:
                         image_format = "png"
                         mime_type = "image/png"
-                    data_url = f"data:{mime_type};base64,{img.image_base64}"
+
+                    data_url = None
+                    if img.object_key and object_storage.enabled:
+                        try:
+                            import base64
+                            image_bytes = object_storage.get_bytes(img.object_key)
+                            image_base64 = base64.b64encode(image_bytes).decode()
+                            data_url = f"data:{mime_type};base64,{image_base64}"
+                        except Exception as e:
+                            logger.warning(f"从 MinIO 读取参考图失败，object_key={img.object_key}: {e}")
+
+                    if not data_url and img.image_base64:
+                        data_url = f"data:{mime_type};base64,{img.image_base64}"
+
+                    if not data_url:
+                        continue
+
                     images_data.append({
                         "url": data_url,
                         "format": image_format,
