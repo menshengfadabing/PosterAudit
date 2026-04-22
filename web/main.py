@@ -27,7 +27,7 @@ from sqlmodel import SQLModel
 
 from src.utils.config import settings
 from web.deps import engine
-from web.routers import audit, brands, me, review, stats
+from web.routers import audit, brands, me, review, stats, system
 
 app = FastAPI(
     title="品牌合规审核 API",
@@ -47,6 +47,7 @@ app.include_router(audit.router,  prefix="/api/v1", tags=["审核"])
 app.include_router(review.router, prefix="/api/v1", tags=["人工复核"])
 app.include_router(stats.router,  prefix="/api/v1", tags=["统计"])
 app.include_router(me.router,     prefix="/api/v1", tags=["身份"])
+app.include_router(system.router, prefix="/api/v1", tags=["系统配置"])
 
 
 def _migrate_reference_images_table() -> None:

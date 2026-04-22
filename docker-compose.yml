@@ -9,11 +9,13 @@ services:
       - .env.docker
     environment:
       PYTHONPATH: /app
-    command: ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+      LLM_CONFIG_FILE: /app/.env.docker
+    command: ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
     ports:
       - "127.0.0.1:${API_BIND_PORT:-18080}:8080"
     volumes:
       - ./data:/app/data
+      - ./.env.docker:/app/.env.docker
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 15s
@@ -28,9 +30,11 @@ services:
       - .env.docker
     environment:
       PYTHONPATH: /app
+      LLM_CONFIG_FILE: /app/.env.docker
     command: ["celery", "--workdir", "/app", "-A", "celery_app.celery", "worker", "-Q", "audit", "-l", "info", "--concurrency", "${CELERY_CONCURRENCY:-2}", "-n", "audit1@%h"]
     volumes:
       - ./data:/app/data
+      - ./.env.docker:/app/.env.docker
     depends_on:
       api:
         condition: service_started
@@ -43,9 +47,11 @@ services:
       - .env.docker
     environment:
       PYTHONPATH: /app
+      LLM_CONFIG_FILE: /app/.env.docker
     command: ["celery", "--workdir", "/app", "-A", "celery_app.celery", "worker", "-Q", "audit", "-l", "info", "--concurrency", "${CELERY_CONCURRENCY:-2}", "-n", "audit2@%h"]
     volumes:
       - ./data:/app/data
+      - ./.env.docker:/app/.env.docker
     profiles: ["scale"]
     depends_on:
       api:
@@ -59,9 +65,11 @@ services:
       - .env.docker
     environment:
       PYTHONPATH: /app
+      LLM_CONFIG_FILE: /app/.env.docker
     command: ["celery", "--workdir", "/app", "-A", "celery_app.celery", "worker", "-Q", "audit", "-l", "info", "--concurrency", "${CELERY_CONCURRENCY:-2}", "-n", "audit3@%h"]
     volumes:
       - ./data:/app/data
+      - ./.env.docker:/app/.env.docker
     profiles: ["scale"]
     depends_on:
       api:

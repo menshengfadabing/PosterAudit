@@ -945,15 +945,16 @@ class LLMService:
         """
         try:
             from langchain_openai import ChatOpenAI
-
-            if not settings.mllm_api_key:
+            keys = settings.get_mllm_api_keys()
+            test_key = keys[0] if keys else ""
+            if not test_key:
                 return False, "未配置多模态模型 API Key"
 
             # 使用一个简单的测试请求
             llm = ChatOpenAI(
                 model=settings.mllm_model,
                 base_url=settings.mllm_api_base,
-                api_key=settings.mllm_api_key,
+                api_key=test_key,
                 temperature=0.1,
                 timeout=30,
             )
