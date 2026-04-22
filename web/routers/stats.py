@@ -248,6 +248,17 @@ def delete_reviewer(user_id: str, session: Session = Depends(get_session)):
         return
 
     if user.role == "admin":
+        # 检查是否是最后一个管理员
+        admin_count = session.exec(
+            select(func.count(User.id)).where(User.role == "admin")
+        ).one()
+
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="无法删除最后一个管理员，系统至少需要保留一个管理员账号"
+            )
+
         user.role = "user"
         user.updated_at = datetime.now()
         session.add(user)
