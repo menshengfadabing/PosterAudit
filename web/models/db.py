@@ -27,6 +27,7 @@ class AuditTask(SQLModel, table=True):
     __tablename__ = "audit_tasks"
 
     id: str                         = Field(primary_key=True)   # UUID，由应用层生成
+    batch_id: Optional[str]         = Field(default=None, index=True)  # 批次 ID，同系列图片共享（用于合并审核）
     brand_id: str                   = Field(foreign_key="brands.id", index=True)
     name: Optional[str]             = None  # 素材名称（文件名）
     created_by: Optional[str]       = Field(default=None, index=True)  # 任务创建者（用户名/域账号）

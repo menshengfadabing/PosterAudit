@@ -31,3 +31,27 @@ def run_audit_task(
     except Exception as exc:
         set_task_status(task_id, "failed")
         raise self.retry(exc=exc, countdown=30)
+
+
+@celery.task(bind=True, name="audit.run_batch", max_retries=2, queue="audit")
+def run_batch_audit_task(
+    self,
+    task_ids: list[str],
+    brand_id: str,
+    image_paths: list[str],
+    batch_size: int | None,
+    compression: str,
+    preconditions: dict | None,
+):
+    """Celery 任务入口：批量审核（同系列图片合并审核，结果分发到各个独立任务）"""
+    try:
+        for tid in task_ids:
+            set_task_status(tid, "pending")
+        from web.routers.audit import _run_batch_audit
+
+        asyncio.run(_run_batch_audit(task_ids, brand_id, image_paths, batch_size, compression, preconditions))
+        return {"task_ids": task_ids, "status": "completed"}
+    except Exception as exc:
+        for tid in task_ids:
+            set_task_status(tid, "failed")
+        raise self.retry(exc=exc, countdown=30)
