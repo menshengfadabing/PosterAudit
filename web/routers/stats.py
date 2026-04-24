@@ -119,6 +119,23 @@ def get_history_stats(
         for brand in session.exec(brands_q).all():
             brands_map[brand.id] = brand.name
 
+    # 统计各部门任务数
+    dept_stats_dict: dict[str, int] = {}
+    tasks_query = select(AuditTask).where(AuditTask.created_at >= cutoff_date)
+    tasks = session.exec(tasks_query).all()
+    for task in tasks:
+        if task.input_meta and isinstance(task.input_meta, dict):
+            preconditions = task.input_meta.get("preconditions", {})
+            if isinstance(preconditions, dict):
+                dept = preconditions.get("department")
+                if dept:
+                    dept_stats_dict[dept] = dept_stats_dict.get(dept, 0) + 1
+
+    dept_stats = [
+        {"department": dept, "count": count}
+        for dept, count in sorted(dept_stats_dict.items(), key=lambda x: x[1], reverse=True)
+    ]
+
     return {
         "days": days,
         "total_tasks": total_count,
@@ -132,6 +149,7 @@ def get_history_stats(
         "top_brands": [
             {"brand_id": b[0], "brand_name": brands_map.get(b[0], b[0]), "count": b[1]} for b in brand_stats
         ],
+        "dept_stats": dept_stats,
     }
 
 
