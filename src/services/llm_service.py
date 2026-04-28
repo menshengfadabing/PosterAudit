@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+from pathlib import Path
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,41 +13,22 @@ from src.utils.json_parser import parse_json_response, parse_json_array
 
 logger = logging.getLogger(__name__)
 
+_PROMPT_DIR = Path(__file__).parent.parent.parent / "prompt"
+
+
+def _load_prompt(filename: str) -> str:
+    """从 prompt/ 目录加载提示词文件，文件不存在时抛出异常。"""
+    path = _PROMPT_DIR / filename
+    return path.read_text(encoding="utf-8")
+
 
 # 审核Prompt - 单图审核（精简输出）
-COMPRESSED_AUDIT_PROMPT = '''你是品牌视觉合规审计官。按以下步骤审核设计稿：
+COMPRESSED_AUDIT_PROMPT = _load_prompt("image_audit.md")
 
-第一步：观察图片，识别以下要素：Logo位置/尺寸/变形情况、主要颜色、文字内容与字体、整体布局。
-第二步：逐条对照规则清单，基于第一步的观察结果作出判定。
-第三步：输出JSON。
+# 批量审核Prompt - 多图合并（精简输出）
+BATCH_AUDIT_PROMPT = _load_prompt("image_audit_batch.md")
 
-【判定标准】
-- p(pass): 图片中该项明确符合规则，可视觉确认
-- f(fail): 图片中该项明确违反规则，可视觉确认
-- r(review): 图中该项模糊/不可见/无法确认，需人工复核
-- c(置信度): 你对该判定的把握程度，0.0=完全不确定，1.0=完全确定
-
-【规则清单 - 共{rule_count}条】
-{rules_checklist}
-{reference_hint}
-【输出要求】只输出JSON:
-{{
-  "results": [
-    {{"id": "Rule_N", "s": "p|f|r", "c": 0.0-1.0}}
-  ],
-  "detection": {{
-    "colors": [{{"hex": "#XXX", "name": "名称", "percent": 比例}}],
-    "logo": {{"found": bool, "position": "位置", "size_percent": 数值, "position_correct": bool, "deformed": bool}},
-    "texts": ["识别的文字"],
-    "fonts": [{{"text": "文字", "font_family": "字体", "is_forbidden": bool}}]
-  }},
-  "issues": [{{"type": "类型", "severity": "严重程度", "description": "问题", "suggestion": "建议"}}],
-  "summary": "总体评价"
-}}
-
-注意：无法从图中观察到的规则项（如字体名称不可见），置信度应低于0.5并标记为r。'''
-
-# 参考图片提示模板
+# 参考图片提示模板（内联，不单独成文件）
 REFERENCE_IMAGE_PROMPT = '''
 【标准参考图片】
 以下提供了品牌的标准Logo/图标等参考图片。请仔细对比：
@@ -55,40 +37,6 @@ REFERENCE_IMAGE_PROMPT = '''
 3. 判断Logo是否存在变形、拉伸或颜色错误
 '''
 
-# 批量审核Prompt - 多图合并（精简输出）
-BATCH_AUDIT_PROMPT = '''你是品牌视觉合规审计官。按以下步骤审核多张设计稿。
-{reference_hint}
-【判定标准】
-- p(pass): 该项明确符合规则，可视觉确认
-- f(fail): 该项明确违反规则，可视觉确认
-- r(review): 该项模糊/不可见/无法确认，需人工复核
-- c(置信度): 对该判定的把握程度，无法观察到的项置信度应<0.5
-
-【规则清单 - 共{rule_count}条】
-{rules_checklist}
-
-【输出格式】JSON数组:
-[
-  {{
-    "idx": 0,
-    "results": [
-      {{"id": "Rule_N", "s": "p|f|r", "c": 0.0-1.0}}
-    ],
-    "detection": {{
-      "colors": [{{"hex": "#XXX", "name": "名称", "percent": 比例}}],
-      "logo": {{"found": bool, "position": "位置", "size_percent": 数值}},
-      "texts": ["识别的文字"],
-      "fonts": [{{"text": "文字", "font_family": "字体", "is_forbidden": bool}}]
-    }},
-    "issues": [{{"type": "类型", "severity": "严重程度", "description": "问题", "suggestion": "建议"}}],
-    "summary": "评价"
-  }}
-]
-
-重要:
-1. idx: 图片序号(从0开始)
-2. results: 每条规则结果，id=规则ID，s=状态(p/f/r)，c=置信度
-3. 必须为每张图片的每条规则输出结果'''
 
 
 class LLMService:

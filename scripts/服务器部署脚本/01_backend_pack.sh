@@ -12,7 +12,6 @@ SERVER_PATH="/opt/project/python_project/"
 echo "=== [1/2] 打包后端 ==="
 cd "$BACKEND_DIR"
 tar -czf "$PACK_FILE" \
-  --exclude=.git \
   --exclude=.venv \
   --exclude=__pycache__ \
   --exclude='*.pyc' \
